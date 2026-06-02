@@ -1,8 +1,0 @@
-[package]
-name = "cpal_spike"
-version = "0.1.0"
-edition = "2021"
-publish = false
-
-[dependencies]
-cpal = "0.17.3"

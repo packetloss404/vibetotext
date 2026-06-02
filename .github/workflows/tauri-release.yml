@@ -1,4 +1,4 @@
-# Builds and releases the Tauri app (app/src-tauri) for Windows, macOS, and Linux.
+# Builds and releases the Tauri app (src-tauri) for Windows, macOS, and Linux.
 #
 # - On a `v*` tag push: a matrix runs tauri-action per OS, builds the bundles
 #   (dmg / nsis+msi / deb+appimage) and uploads them to a draft GitHub release.
@@ -87,7 +87,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app/src-tauri -> target
+          workspaces: src-tauri -> target
           key: ${{ matrix.target }}
 
       - name: Build and release (tauri-action)
@@ -122,8 +122,8 @@ jobs:
           # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
-          # The Tauri project lives under app/src-tauri.
-          projectPath: app/src-tauri
+          # The Tauri project lives under src-tauri.
+          projectPath: src-tauri
           tagName: ${{ github.ref_name }}
           releaseName: 'VibeToText ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version.'
@@ -149,7 +149,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: app/src-tauri
+        working-directory: src-tauri
 
     steps:
       - name: Checkout
@@ -172,7 +172,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app/src-tauri -> target
+          workspaces: src-tauri -> target
           key: build-check-${{ matrix.platform }}
 
       # CPU-only: no metal/cuda/vulkan features (plan §2).

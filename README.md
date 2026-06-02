@@ -1,107 +1,86 @@
 # VibeToText
 
-Voice-to-text for developers featuring AI-powered cleanup and detailed analytics.
+Voice-to-text for developers: hold a hotkey, speak, and the cleaned-up text is
+pasted at your cursor — with local Whisper transcription, AI cleanup/planning,
+semantic code search, and a detailed analytics dashboard.
 
-## Components
+A single cross-platform **Tauri v2** app (Rust backend + webview UI) for
+**Windows, macOS, and Linux**. It replaces the four previous implementations
+(Python CLI, Windows/WPF, macOS/Swift, Electron viewer); see
+[`docs/tauri-migration-plan.md`](docs/tauri-migration-plan.md) for the why and how.
 
-| Component | Directory | Stack |
-|-----------|-----------|-------|
-| **Python CLI** | `src/vibetotext/` | Python 3.9+, Whisper.cpp, sounddevice, pynput |
-| **Windows native app** | `windows-native/` | C# .NET 9, WPF, NAudio, Whisper.net |
-| **macOS native app** | `macos-native/` | Swift 5.9, Metal, macOS 14+ |
-| **Electron history app** | `history-app/` | Electron 28, better-sqlite3, D3.js |
+## Modes (push-to-talk)
 
-All implementations share the same SQLite database at `~/.vibetotext/history.db`.
+Hold a modifier chord, speak, release. Each mode post-processes the transcription
+differently:
+
+| Hotkey | Mode | What it does |
+|---|---|---|
+| `Ctrl+Shift` | **Transcribe** | Raw speech → text (optionally with code context) |
+| `Alt+Shift` | **Cleanup** | Gemini refines rambling into a clear prompt |
+| `Cmd/Meta+Alt+P` | **Plan** | Gemini generates a structured implementation plan |
+| `Cmd/Meta+Alt+Shift` | **Greppy** | Semantic code search injected as context |
+| `Ctrl+Alt` | **History** | Open the History & Analytics window |
 
 ## Features
 
-**Multi-Mode Hotkeys**
-- `Ctrl+Shift` — Raw transcription
-- `Cmd+Shift` — **Greppy** mode with semantic code search
-- `Alt+Shift` — **Cleanup** mode (AI refines rambling into clear prompts)
-- `Cmd+Alt` — **Plan** mode (generates structured implementation plans)
+- **Local transcription** via `whisper-rs` (bundled whisper.cpp), with a
+  technical-vocabulary prompt and a hot-reloadable custom dictionary.
+- **AI cleanup & planning** via Google Gemini (`gemini-3.5-flash`). Optional —
+  falls back to raw text when no API key is set.
+- **Semantic code search** via the external [`greppy`](https://crates.io) CLI
+  (optional; degrades gracefully when absent).
+- **Auto-paste** at the cursor with a clipboard fallback.
+- **Floating waveform overlay** while recording.
+- **Analytics dashboard** (D3): streaks, WPM, activity heatmap, vocabulary,
+  sentiment (VADER), filler words, and more.
+- One shared SQLite history at `~/.vibetotext/history.db`.
 
-**Fast Local Transcription**
-- Whisper.cpp for 2-4x faster transcription than Python Whisper
-- Technical vocabulary bias for programming terms
-- Auto-paste to cursor
+## Architecture
 
-## Analytics & Settings
-
-![Analytics Dashboard](docs/analytics.png)
-
-Press `Cmd+Comma` (macOS) or `Ctrl+Comma` (Windows) to open the **History & Settings** window.
-
-- **Streaks & Personal Records** — Track your current streak, best WPM, most words/day, and longest session.
-- **Topic Speed & Mood** — See how fast and positive you are across topics like Testing, Planning, Documentation, and more. Bar colors shift from negative to positive sentiment.
-- **Daily Goal Progress** — Set daily and weekly word targets and track completion.
-- **Activity Heatmap** — GitHub-style hourly/yearly view of when you dictate most.
-- **Peak Hours & Words Over Time** — Visualize your productivity patterns and dictation volume trends.
-- **Filler Words & Vocabulary Diversity** — Monitor filler word usage and track your unique word count and richness score.
-- **Recent History** — Review and copy previous transcriptions.
-- **Microphone Selection** — Switch audio input devices directly from the UI.
-
-## Cosmic Visualization
-
-The voice-driven 3D game that used to ship inside this repo — **"Don't Anger the AI"** — now lives in its own repository: **[packetloss404/vibegalaxy](https://github.com/packetloss404/vibegalaxy)**.
-
-## Install
-
-### Python CLI
-
-```bash
-pip install -e .
-pip install -e ".[gemini,dev]"   # with Gemini + dev dependencies
+```
+src-tauri/   Rust backend (audio, whisper, hotkeys, paste, overlay, db, llm, greppy, pipeline)
+src/         Webview frontend (D3 analytics dashboard + waveform overlay)
+docs/        Migration plan + release guide
 ```
 
-Optionally set `GEMINI_API_KEY` in a `.env` file to enable cleanup/plan modes. You can copy the `.env.example` file and then add your key.
+The Rust core owns all native work; the webview is the UI. State flows over Tauri
+`invoke` commands and `emit` events (e.g. `history-updated` refreshes the
+dashboard instantly). See the migration plan for the full module map and IPC
+contract.
 
-### Windows Native App
+## Build & run
 
-```bash
-cd windows-native
-build.bat                        # or: dotnet build src/VibeToText/VibeToText.csproj
-```
-
-### macOS Native App
-
-```bash
-cd macos-native
-swift build
-```
-
-Requires macOS 14+ (Sonoma) and Swift 5.9+.
-
-### Platform Builds (Python app)
-
-These scripts package the Python CLI into standalone executables via PyInstaller:
+Prerequisites: Rust stable (≥ 1.94), [`cargo-tauri`](https://tauri.app) v2, a
+C/C++ toolchain + CMake (for whisper.cpp), and the per-OS native deps listed in
+[`docs/release.md`](docs/release.md).
 
 ```bash
-# Windows (from project root) → dist/vibetotext-engine.exe, dist/vibetotext-ui.exe
-build_windows.bat
-
-# macOS
-bash packaging/macos/build_macos.sh
-
-# Linux
-bash packaging/linux/build_linux.sh
+cd src-tauri
+cargo tauri dev      # run in development
+cargo tauri build    # produce installers (msi/nsis, dmg, deb/appimage)
 ```
 
-Executables will be in the `dist/` folder. See `packaging/` for platform-specific configs.
+CPU-only by default. GPU backends are opt-in: `cargo tauri build --features metal|cuda|vulkan`.
 
-## Usage
+## Configuration
 
-```bash
-vibetotext              # Start with default hotkeys
-vibetotext --model base # Use specific Whisper model
-```
+- `~/.vibetotext/config.json` — audio device, whisper model, custom dictionary,
+  codebase path (for greppy), overlay position.
+- Gemini key resolution: `GEMINI_API_KEY` / `GOOGLE_API_KEY` env →
+  `~/.vibetotext/.env` → `config.json`. Copy `.env.example` to get started.
+- **Models** download on first use to `~/.vibetotext/models/ggml-<model>.bin`
+  (nothing is bundled).
 
-## Start/Stop with History Application
+## Platform notes
 
-```bash
-start-all.sh
-```
+- **Linux:** X11 / XWayland is the supported path (global hotkeys via `rdev` are
+  X11-only); native Wayland is a planned follow-up (swap the hotkey backend to
+  `hotkey-listener`).
+- **macOS:** grant **Accessibility** (global hotkeys + paste) and **Microphone**
+  permissions on first run.
 
-```bash
-stop-all.sh
-```
+## Releasing
+
+See [`docs/release.md`](docs/release.md) for bundling, code signing/notarization,
+and the CI matrix (`.github/workflows/tauri-release.yml`).

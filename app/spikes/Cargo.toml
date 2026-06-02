@@ -1,7 +1,0 @@
-[workspace]
-resolver = "2"
-members = [
-    "rdev_spike",
-    "whisper_spike",
-    "cpal_spike",
-]

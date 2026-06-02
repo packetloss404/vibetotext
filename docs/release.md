@@ -1,7 +1,7 @@
 # VibeToText Release Guide
 
 How to build, sign, and ship the Tauri app. Reflects the actual config in
-`app/src-tauri/` (`Cargo.toml`, `tauri.conf.json`). For the design rationale see
+`src-tauri/` (`Cargo.toml`, `tauri.conf.json`). For the design rationale see
 [`tauri-migration-plan.md`](./tauri-migration-plan.md) §5–§9.
 
 > Environment honesty: builds are authoritatively verified on **Windows only**.
@@ -19,7 +19,7 @@ How to build, sign, and ship the Tauri app. Reflects the actual config in
   Install via `rustup toolchain install stable`.
 - **cargo-tauri** (v2): `cargo install tauri-cli --version "^2"` (developed
   against cargo-tauri 2.10). Invoke as `cargo tauri ...`.
-- **Node 24** + npm (the frontend in `app/src/` is served as `frontendDist`).
+- **Node 24** + npm (the frontend in `src/` is served as `frontendDist`).
 - **CMake** (>= 3.x) and a C/C++ compiler — required to build `whisper-rs`
   (bundled whisper.cpp) and the bundled SQLite.
 
@@ -44,7 +44,7 @@ How to build, sign, and ship the Tauri app. Reflects the actual config in
 
 ## 2. Build locally (per OS)
 
-From `app/src-tauri/`:
+From `src-tauri/`:
 
 ```sh
 cargo tauri build
@@ -81,7 +81,7 @@ cargo tauri build --features local-api
 `bundle.targets` in `tauri.conf.json` is the explicit array
 `["nsis","msi","app","dmg","deb","appimage"]`; `cargo tauri build` produces the
 targets the host OS supports. Outputs land under
-`app/src-tauri/target/release/bundle/`:
+`src-tauri/target/release/bundle/`:
 
 | OS | Artifacts |
 |---|---|
@@ -101,11 +101,11 @@ Product name is **VibeToText**, identifier `com.vibetotext.app`, version from
 
 1. Install a **Developer ID Application** certificate into the keychain (CI:
    import the `.p12` via the secrets in §5).
-2. `app/src-tauri/entitlements.plist` is committed and referenced from
+2. `src-tauri/entitlements.plist` is committed and referenced from
    `tauri.conf.json` `bundle.macOS.entitlements`. It grants microphone access
    (`com.apple.security.device.audio-input`) and the hardened-runtime entries
    notarization requires. The macOS microphone TCC prompt also needs a usage
-   string: `app/src-tauri/Info.plist` provides `NSMicrophoneUsageDescription`
+   string: `src-tauri/Info.plist` provides `NSMicrophoneUsageDescription`
    (Tauri merges `src-tauri/Info.plist` into the bundle). Accessibility (global
    hotkeys + synthetic paste) is a runtime TCC grant via `AXIsProcessTrusted`,
    not an entitlement.
@@ -179,8 +179,8 @@ first run.
 
 ## 7. Release checklist
 
-1. Bump `version` in **both** `app/src-tauri/Cargo.toml` and
-   `app/src-tauri/tauri.conf.json`.
+1. Bump `version` in **both** `src-tauri/Cargo.toml` and
+   `src-tauri/tauri.conf.json`.
 2. Build per OS (§2); for macOS/Windows sign + (macOS) notarize (§4).
 3. Verify bundles install and the app launches (first-run downloads a model).
 4. Tag `vX.Y.Z` and push — CI builds the matrix and attaches the bundles to the
