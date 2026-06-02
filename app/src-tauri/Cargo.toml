@@ -54,13 +54,30 @@ whisper-rs = "0.16"
 # system OpenSSL dependency on Linux. 0.13 matches the copy tauri already pulls.
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
 
+# Phase 3 hotkeys + paste.
+# Global low-level key listener for the push-to-talk chord state machine
+# (hotkey.rs). 0.5.3 spike-pinned (plan §3) — `listen` is X11-only on Linux and
+# needs macOS Accessibility; abstracted behind a trait for a later Wayland swap.
+# Windows verified by the spike; macOS/Linux written-but-unverified here.
+rdev = "0.5.3"
+# Cross-platform input simulation for auto-paste (paste.rs). Always copy-to-
+# clipboard first so a paste failure degrades to manual paste (port of
+# output.py fallback semantics).
+enigo = "0.6"
+# Clipboard access for the paste fallback path (paste.rs).
+arboard = "3.6"
+
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # GPU acceleration is scaffolded but OFF by default (CPU-only MVP). Each flag
 # forwards to the matching whisper-rs backend feature; opt-in builds only.
 [features]
-default = []
+# rdev-backend activates the real rdev global-hotkey listener (hotkey/mod.rs).
+# On by default; building without it falls back to a no-op backend, which is the
+# seam for swapping in a hotkey-listener/evdev backend for native Wayland later.
+default = ["rdev-backend"]
+rdev-backend = []
 metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
 vulkan = ["whisper-rs/vulkan"]

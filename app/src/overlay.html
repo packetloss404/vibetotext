@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeToText Overlay</title>
+    <style>
+      /* Fully transparent shell: only the bars are painted. The Tauri window is
+         created with .transparent(true) (and macOS private API per overlay.rs),
+         so html/body must not paint any background. */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        /* Belt-and-suspenders: the OS window is already click-through via
+           set_ignore_cursor_events, but disable pointer events here too. */
+        pointer-events: none;
+        user-select: none;
+      }
+
+      #waveform {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="waveform"></canvas>
+    <script src="overlay.js"></script>
+  </body>
+</html>

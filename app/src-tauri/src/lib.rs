@@ -23,6 +23,17 @@ mod audio;
 mod transcribe;
 mod models;
 
+// Phase 3 modules (global hotkey chord listener + auto-paste + overlay window).
+// This scaffold OWNS the declarations and the overlay window creation only; the
+// hotkey/paste/overlay bodies are authored by sibling Phase-3 builders. They are
+// intentionally unused until the Phase 4 pipeline wires the record/transcribe/
+// paste flow — `unused` warnings here are expected. The overlay window itself is
+// created at startup so the live waveform has a target as soon as Phase 4 lands.
+mod hotkey;
+mod paste;
+#[cfg(desktop)]
+mod overlay;
+
 // Phase 1 integration surface.
 pub mod commands;
 pub mod events;
@@ -83,6 +94,13 @@ pub fn run() {
             // System tray (desktop only): app icon + Show/Quit menu.
             #[cfg(desktop)]
             tray::setup(app.handle())?;
+
+            // Create the hidden, transparent, click-through waveform overlay
+            // window up front (desktop only) so the live recording indicator has
+            // a target the instant the Phase-4 pipeline starts emitting levels.
+            // It stays hidden until the pipeline shows it on record start.
+            #[cfg(desktop)]
+            overlay::ensure(app.handle())?;
 
             tracing::info!("VibeToText backend initialized");
             Ok(())
