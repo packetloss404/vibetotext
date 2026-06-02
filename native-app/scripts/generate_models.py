@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 
 API_BASE = "https://api.tripo3d.ai/v2/openapi"
-API_KEY = os.environ.get("TRIPO_API_KEY", "***REMOVED***")
+API_KEY = os.environ.get("TRIPO_API_KEY")
+if not API_KEY:
+    raise SystemExit("Set TRIPO_API_KEY in your environment (see .env.example) before running this script.")
 HEADERS = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {API_KEY}",
