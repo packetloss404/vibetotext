@@ -22,6 +22,7 @@
 use serde_json::Value;
 use tauri::State;
 
+use crate::audio::devices::{list_input_devices, AudioDevice};
 use crate::config::AppConfig;
 use crate::db::{Db, Entry, Statistics};
 use crate::state::AppState;
@@ -135,15 +136,17 @@ pub fn save_config(config: Value) -> Result<Value, String> {
     serde_json::to_value(&cfg).map_err(|e| e.to_string())
 }
 
-/// Enumerate input audio devices.
+/// Enumerate input audio devices via cpal's default host.
 ///
-/// STUB for Phase 1 — returns an empty list. Phase 2 wires real cpal host-device
-/// enumeration (replacing the old `navigator.mediaDevices.enumerateDevices`).
+/// Replaces the old Electron `navigator.mediaDevices.enumerateDevices()`. Returns
+/// `[{ index, name, is_default }, ...]` where `index` is the host enumeration index
+/// stored in `config.audio_device_index` (risk #5: distinct from the web
+/// `audio_device_id`; the recorder reconciles the two). Infallible at the cpal layer
+/// (a device-less host yields an empty list), but kept `Result` for IPC-contract
+/// stability.
 #[tauri::command]
-pub fn list_audio_devices() -> Result<Vec<Value>, String> {
-    // TODO(Phase 2): cpal enumeration — return [{ index, name, is_default }, ...]
-    // reconciling audio_device_index (host index) vs audio_device_id (web id).
-    Ok(Vec::new())
+pub fn list_audio_devices() -> Result<Vec<AudioDevice>, String> {
+    Ok(list_input_devices())
 }
 
 /// Persist the selected microphone (host index + display name). Replaces the

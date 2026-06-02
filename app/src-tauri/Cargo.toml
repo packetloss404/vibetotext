@@ -41,17 +41,29 @@ dirs = "6.0"
 anyhow = "1.0"
 thiserror = "2.0"
 
+# Phase 2 audio + transcription.
+# cpal 0.17.3 pinned (spike-confirmed known-good, plan §3). WASAPI verified on
+# Windows; CoreAudio (macOS) / ALSA (Linux) written-but-unverified here.
+cpal = "0.17.3"
+# FFT for the waveform band-mapping (25 bars), matching recorder.py.
+rustfft = "6.4"
+# Local whisper.cpp bindings. CPU default features (CPU-only MVP); GPU backends are
+# opt-in via the metal/cuda/vulkan cargo features below. 0.16 pinned (plan §3).
+whisper-rs = "0.16"
+# Model download-on-first-run (models.rs). Blocking client; rustls-tls avoids a
+# system OpenSSL dependency on Linux. 0.13 matches the copy tauri already pulls.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# GPU acceleration is scaffolded but OFF by default (CPU-only MVP).
-# These features are wired through to whisper-rs in Phase 2 when the
-# transcribe module lands. Declared here so the flag surface is stable.
+# GPU acceleration is scaffolded but OFF by default (CPU-only MVP). Each flag
+# forwards to the matching whisper-rs backend feature; opt-in builds only.
 [features]
 default = []
-metal = []
-cuda = []
-vulkan = []
+metal = ["whisper-rs/metal"]
+cuda = ["whisper-rs/cuda"]
+vulkan = ["whisper-rs/vulkan"]
 # Feature-gated localhost HTTP transcription endpoint (Phase 5).
 local-api = []
 

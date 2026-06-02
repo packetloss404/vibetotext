@@ -15,6 +15,14 @@ pub mod db;
 pub mod sentiment;
 pub mod state;
 
+// Phase 2 modules (audio capture + transcription + model resolution). `audio`
+// is wired here by the Phase-2 devices/wiring agent; `transcribe` and `models`
+// bodies are authored by sibling builders — declared so the crate links once
+// they land (the Verify agent runs the authoritative build).
+mod audio;
+mod transcribe;
+mod models;
+
 // Phase 1 integration surface.
 pub mod commands;
 pub mod events;
