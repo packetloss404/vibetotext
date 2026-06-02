@@ -11,7 +11,7 @@
 #define MyAppName "VibeToText"
 #define MyAppVersion "0.1.0"
 #define MyAppPublisher "VibeToText"
-#define MyAppURL "https://github.com/dyoburon/vibetotext"
+#define MyAppURL "https://github.com/packetloss404/vibetotext"
 #define MyAppExeName "vibetotext-engine.exe"
 
 [Setup]

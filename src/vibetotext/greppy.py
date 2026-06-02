@@ -2,11 +2,12 @@
 
 import json
 import subprocess
+from pathlib import Path
 from typing import List, Tuple
 
 
-# Default codebase path (will be configurable later)
-DEFAULT_CODEBASE = "/Users/dylan/Desktop/projects/datafeeds"
+# Default codebase path — unset by default; provide one via the --codebase flag.
+DEFAULT_CODEBASE = None
 
 
 def search_files(query: str, limit: int = 10, codebase: str = None) -> List[Tuple[str, int]]:
@@ -23,6 +24,8 @@ def search_files(query: str, limit: int = 10, codebase: str = None) -> List[Tupl
     """
     if codebase is None:
         codebase = DEFAULT_CODEBASE
+    if not codebase:
+        return []
 
     try:
         # Rust greppy: query first, then options

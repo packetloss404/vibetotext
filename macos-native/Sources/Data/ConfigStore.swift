@@ -104,12 +104,6 @@ final class ConfigStore: ObservableObject {
         if let key = readEnvKey("GEMINI_API_KEY") { return key }
         if let key = readEnvKey("GOOGLE_API_KEY") { return key }
 
-        // Also check project-level .env
-        let projectEnv = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("dev/vibetotext/.env")
-        if let key = readEnvKey("GEMINI_API_KEY", from: projectEnv) { return key }
-        if let key = readEnvKey("GOOGLE_API_KEY", from: projectEnv) { return key }
-
         return nil
     }
 
