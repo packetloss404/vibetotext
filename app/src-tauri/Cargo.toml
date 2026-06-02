@@ -22,7 +22,10 @@ tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
 # `tray-icon` gates the `tauri::tray` API used by `src/tray.rs` (Phase 1 system tray).
-tauri = { version = "2.11", features = ["tray-icon"] }
+# `macos-private-api` is required because tauri.conf.json sets app.macOSPrivateApi=true
+# (transparent/click-through overlay window, Phase 3); tauri-build validates that the
+# config allowlist matches the enabled cargo features.
+tauri = { version = "2.11", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-single-instance = "2.4"
 tauri-plugin-window-state = "2.4"
 
@@ -70,6 +73,12 @@ arboard = "3.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Phase 5 feature-gated localhost HTTP transcription endpoint (local_api.rs).
+# Optional: only compiled in when the `local-api` cargo feature is enabled, so a
+# default build pulls in no extra HTTP server. tiny_http is a tiny, blocking,
+# dependency-light server — bound to 127.0.0.1 loopback only for security.
+tiny_http = { version = "0.12", optional = true }
+
 # GPU acceleration is scaffolded but OFF by default (CPU-only MVP). Each flag
 # forwards to the matching whisper-rs backend feature; opt-in builds only.
 [features]
@@ -81,8 +90,9 @@ rdev-backend = []
 metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
 vulkan = ["whisper-rs/vulkan"]
-# Feature-gated localhost HTTP transcription endpoint (Phase 5).
-local-api = []
+# Feature-gated localhost HTTP transcription endpoint (Phase 5). Off by default;
+# pulls in the optional `tiny_http` dep only when explicitly enabled.
+local-api = ["dep:tiny_http"]
 
 [profile.release]
 # whisper.cpp + rusqlite bundled builds benefit from LTO; keep panic=abort

@@ -44,6 +44,12 @@ mod pipeline;
 mod llm;
 mod greppy;
 
+// Phase 5: feature-gated localhost HTTP transcription endpoint. Compiled in
+// ONLY when the `local-api` cargo feature is enabled (off by default), so a
+// default build contains none of this code or its `tiny_http` dependency.
+#[cfg(feature = "local-api")]
+mod local_api;
+
 // Phase 1 integration surface.
 pub mod commands;
 pub mod events;
@@ -122,6 +128,14 @@ pub fn run() {
             if let Err(e) = pipeline::start(app.handle()) {
                 tracing::error!(error = %e, "failed to start capture pipeline; \
                     dictation/hotkeys disabled (history + dashboard still work)");
+            }
+
+            // Feature-gated localhost HTTP transcription endpoint (Phase 5).
+            // Bound to 127.0.0.1 loopback only. A start failure is logged but
+            // MUST NOT crash app startup — the endpoint is an optional extra.
+            #[cfg(feature = "local-api")]
+            if let Err(e) = local_api::start(app.handle()) {
+                tracing::error!(error = %e, "failed to start local transcription API");
             }
 
             tracing::info!("VibeToText backend initialized");

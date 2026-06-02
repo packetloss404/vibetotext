@@ -1,0 +1,187 @@
+# Builds and releases the Tauri app (app/src-tauri) for Windows, macOS, and Linux.
+#
+# - On a `v*` tag push: a matrix runs tauri-action per OS, builds the bundles
+#   (dmg / nsis+msi / deb+appimage) and uploads them to a draft GitHub release.
+# - On pull requests: a separate `build-check` matrix runs `cargo test` + a
+#   CPU-only `cargo build` on all three OSes to catch breakage before merge.
+#
+# CPU-ONLY (plan §2): the metal/cuda/vulkan cargo features are deliberately NOT
+# enabled here. whisper-rs builds with its default CPU backend. GPU bundles are a
+# documented opt-in follow-up.
+#
+# The frontend is static (tauri.conf.json `frontendDist: "../src"`), so there is
+# no Node/npm build step.
+#
+# This is the new release pipeline; the legacy `release.yml` (PyInstaller-based)
+# is removed in Phase 6.
+
+name: Tauri Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+# tauri-action creates/updates the GitHub release on tag builds.
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Release build: runs only on tag pushes (and manual dispatch). Each matrix
+  # leg bundles for its OS via tauri-action and attaches artifacts to a draft
+  # release named after the tag.
+  # ---------------------------------------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon (aarch64) -> .dmg
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin --bundles dmg'
+          # Intel macOS (x86_64) -> .dmg
+          - platform: macos-13
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin --bundles dmg'
+          # Windows (x86_64) -> NSIS + MSI installers
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: '--bundles nsis,msi'
+          # Linux (x86_64) -> .deb + AppImage
+          - platform: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            args: '--bundles deb,appimage'
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Tauri/wry need these GTK/WebKit dev libraries on Linux only.
+      # libwebkit2gtk-4.1 = Tauri v2 webview; appindicator = system tray;
+      # librsvg2 = SVG icon rendering.
+      - name: Install Linux system dependencies (Tauri/wry)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Build and release (tauri-action)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # --- Updater artifact signing (cross-platform) ---
+          # TAURI_SIGNING_PRIVATE_KEY signs update bundles; harmless when the
+          # updater is disabled. Provide via secrets to enable.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+          # --- macOS code signing + notarization (placeholders) ---
+          # Populate these repo secrets to enable signed/notarized .dmg builds.
+          # Until then the macOS legs produce unsigned bundles.
+          #   APPLE_CERTIFICATE         base64 of the .p12 signing cert
+          #   APPLE_CERTIFICATE_PASSWORD password for the .p12
+          #   APPLE_SIGNING_IDENTITY    e.g. "Developer ID Application: Name (TEAMID)"
+          #   APPLE_ID / APPLE_PASSWORD app-store-connect creds (app-specific pwd)
+          #   APPLE_TEAM_ID             10-char Apple Team ID
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+          # --- Windows code signing (placeholders) ---
+          # Tauri reads these from tauri.conf.json's bundle.windows.* or via the
+          # WiX/NSIS signing hooks. Wire your cert here when available, e.g.:
+          # WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          # WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        with:
+          # The Tauri project lives under app/src-tauri.
+          projectPath: app/src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: 'VibeToText ${{ github.ref_name }}'
+          releaseBody: 'See the assets below to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+  # ---------------------------------------------------------------------------
+  # PR build check: not a release. Compiles and tests the Rust crate (CPU-only)
+  # on all three OSes so pull requests fail fast on breakage. Does NOT bundle.
+  # ---------------------------------------------------------------------------
+  build-check:
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - macos-14
+          - windows-latest
+          - ubuntu-latest
+
+    runs-on: ${{ matrix.platform }}
+
+    defaults:
+      run:
+        working-directory: app/src-tauri
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies (Tauri/wry)
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          key: build-check-${{ matrix.platform }}
+
+      # CPU-only: no metal/cuda/vulkan features (plan §2).
+      - name: cargo test
+        run: cargo test --locked
+
+      - name: cargo build (CPU)
+        run: cargo build --locked
+
+      # Exercise the feature-gated localhost endpoint so it can't rot undetected.
+      - name: cargo test (local-api feature)
+        run: cargo test --locked --features local-api
