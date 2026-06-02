@@ -34,6 +34,16 @@ mod paste;
 #[cfg(desktop)]
 mod overlay;
 
+// Phase 4 modules (pipeline orchestrator + Gemini LLM client + greppy wrapper).
+// This wiring agent OWNS only the declarations and the `pipeline::start` call in
+// setup; the module *bodies* are authored by sibling Phase-4 builders. Declaring
+// them here makes the previously-unused Phase 2/3 code (hotkey/paste/overlay/
+// recorder/transcribe/models) live, so their `unused` warnings clear once the
+// pipeline links.
+mod pipeline;
+mod llm;
+mod greppy;
+
 // Phase 1 integration surface.
 pub mod commands;
 pub mod events;
@@ -101,6 +111,18 @@ pub fn run() {
             // It stays hidden until the pipeline shows it on record start.
             #[cfg(desktop)]
             overlay::ensure(app.handle())?;
+
+            // Start the capture pipeline (hotkey listener + record/transcribe/
+            // paste orchestration). MUST run after `overlay::ensure` so the live
+            // waveform has a target window the instant a recording begins. A
+            // pipeline start failure (e.g. missing OS permission, no audio
+            // device) is logged but MUST NOT crash app startup — the dashboard
+            // and history still work without live capture.
+            #[cfg(desktop)]
+            if let Err(e) = pipeline::start(app.handle()) {
+                tracing::error!(error = %e, "failed to start capture pipeline; \
+                    dictation/hotkeys disabled (history + dashboard still work)");
+            }
 
             tracing::info!("VibeToText backend initialized");
             Ok(())
