@@ -1,0 +1,61 @@
+[package]
+name = "vibetotext"
+version = "0.1.0"
+description = "VibeToText - cross-platform push-to-talk transcription"
+authors = ["VibeToText"]
+edition = "2021"
+rust-version = "1.77"
+default-run = "vibetotext"
+
+# The library that main.rs drives. Tauri v2 convention: app logic lives in a
+# lib crate so it can also be reused by mobile/test targets.
+[lib]
+name = "vibetotext_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "vibetotext"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = [] }
+tauri-plugin-single-instance = "2.4"
+tauri-plugin-window-state = "2.4"
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Bundled SQLite so we don't depend on a system libsqlite3 across OSes.
+# Pinned to 0.39 (libsqlite3-sys 0.37): rusqlite 0.40 pulls libsqlite3-sys
+# 0.38 whose build.rs uses cfg_select!, which requires Rust >=1.95; we build
+# on stable 1.94.1. Revisit when the toolchain moves to >=1.95.
+rusqlite = { version = "0.39", features = ["bundled"] }
+
+# Resolves ~/.vibetotext and per-OS config/data dirs.
+dirs = "6.0"
+
+anyhow = "1.0"
+thiserror = "2.0"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# GPU acceleration is scaffolded but OFF by default (CPU-only MVP).
+# These features are wired through to whisper-rs in Phase 2 when the
+# transcribe module lands. Declared here so the flag surface is stable.
+[features]
+default = []
+metal = []
+cuda = []
+vulkan = []
+# Feature-gated localhost HTTP transcription endpoint (Phase 5).
+local-api = []
+
+[profile.release]
+# whisper.cpp + rusqlite bundled builds benefit from LTO; keep panic=abort
+# off so tracing can capture backtraces in crash logging.
+codegen-units = 1
+lto = true
