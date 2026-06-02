@@ -38,11 +38,24 @@ scripts, `pyproject.toml`.
 - **Paste:** `enigo` for cross-platform input simulation; always copy-to-clipboard first so a paste
   failure degrades to manual paste + notification sound (port the fallback semantics from
   `src/vibetotext/output.py`).
-- **Toolchain on this machine:** Rust 1.94, cargo-tauri 2.10 (v2), Node 24, cmake 4.3, gcc (MinGW),
-  git ✓. Caveats: **no MSVC `cl`** (Tauri/whisper.cpp default to the `msvc` Windows target — may need
-  MSVC Build Tools or the `gnu` target), and **no `~/.vibetotext`** yet (no local DB to test
-  migrations against — generate fixtures). macOS/Linux builds and all runtime behavior (mic, global
-  hotkeys, paste, overlay) **cannot be verified in this environment** — those need real per-OS CI/hardware.
+- **Toolchain on this machine:** Rust 1.94 (host `x86_64-pc-windows-msvc`), cargo-tauri 2.10 (v2),
+  Node 24, cmake 4.3, git ✓. **Spike-confirmed:** MSVC Build Tools 2022 (VC 14.44.35207) *are*
+  installed — cc/cmake auto-discover them even though `cl` isn't on PATH, so `whisper-rs` (bundled
+  whisper.cpp) builds clean on the standard `msvc` target (~39s); **no MinGW/`gnu`-target workaround
+  needed** (MinGW gcc is present but unused). Risk #2 resolved on Windows. Pinned known-good versions:
+  `whisper-rs 0.16.0`, `rdev 0.5.3`, `cpal 0.17.3` — adopt these in `app/src-tauri/Cargo.toml`.
+  Still true: **no `~/.vibetotext`** yet (generate fixtures for migration tests), and macOS/Linux
+  builds + all runtime behavior (mic, global hotkeys, paste, overlay) **cannot be verified here** —
+  those need real per-OS CI/hardware.
+
+### Spike carry-forwards (from peer review — apply in later phases)
+- **Phase 3 hotkeys:** evaluate chord start on *modifier-state change*, not arbitrary keypress (avoids
+  spurious START on a stray printing key while modifiers held); plan(meta+alt+P) and greppy(meta+alt+shift)
+  share the `meta+alt` prefix — ensure the state machine never double-fires across that transition.
+- **Phase 2 transcribe:** feed cpal-produced f32 buffers directly rather than re-parsing WAV; if WAV is
+  ever parsed, handle `WAVE_FORMAT_EXTENSIBLE` (0xFFFE), not just float tag-3.
+- **Phase 2 recorder:** own resampling for device-native-rate inputs (don't silently drop devices that
+  can't honor exact 16kHz); pin device-index semantics (risk #5: `audio_device_index` vs `audio_device_id`).
 
 ## 4. Target layout
 
