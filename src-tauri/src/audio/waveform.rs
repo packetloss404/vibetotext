@@ -47,6 +47,10 @@ const SPECTRUM_LEN: usize = FFT_SIZE / 2 + 1; // 257
 /// (and silent decay) matters.
 ///
 /// Silent or empty input yields all-zero bars.
+///
+/// Retained as a stateless utility (used by the unit tests); the live pipeline
+/// drives the overlay through [`WaveformAnalyzer`] instead.
+#[allow(dead_code)]
 pub fn compute_bars(samples: &[f32]) -> [f32; NUM_BARS] {
     let planner = make_fft();
     compute_bars_with_fft(&planner, samples)
@@ -72,6 +76,7 @@ impl WaveformAnalyzer {
     }
 
     /// Clear the smoothing state (call at the start of a new recording).
+    #[allow(dead_code)]
     pub fn reset(&mut self) {
         self.prev_levels = [0.0; NUM_BARS];
     }
@@ -156,6 +161,9 @@ fn compute_bars_with_fft(fft: &Arc<dyn Fft<f32>>, samples: &[f32]) -> [f32; NUM_
     let usable_bins = (SPECTRUM_LEN - MIN_FREQ_BIN) as f32; // 253.0
 
     // Exponential (power-2.5) frequency-band mapping into NUM_BARS bars.
+    // `i` drives the band-edge math as well as the `levels[i]` write, so the
+    // index loop is intentional.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..NUM_BARS {
         let lo = (MIN_FREQ_BIN as f32
             + usable_bins * (i as f32 / NUM_BARS as f32).powf(2.5)) as usize;

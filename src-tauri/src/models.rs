@@ -84,8 +84,12 @@ fn models_dir() -> Result<PathBuf> {
 /// to >1 GB), so the response is streamed to disk rather than buffered in RAM.
 fn download_to_file(url: &str, dest: &std::path::Path) -> Result<()> {
     let mut resp = reqwest::blocking::Client::builder()
-        // No read timeout: large models on slow links can take minutes.
-        .timeout(None)
+        // Bound connect, and cap the whole transfer at 30 min, so a dead/stalled
+        // socket can't wedge the caller forever (the pipeline worker calls this
+        // synchronously). 30 min is generous even for the ~1 GB large models on a
+        // slow link, while still guaranteeing the worker eventually unblocks.
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(1800))
         .build()
         .context("failed to build HTTP client")?
         .get(url)

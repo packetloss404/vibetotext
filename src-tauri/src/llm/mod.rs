@@ -83,12 +83,11 @@ fn request_body(prompt: &str, temperature: f64, max_output_tokens: u32) -> serde
     })
 }
 
-/// Endpoint URL for the GA model, with the API key as a query param (matches the
-/// REST convention used by the Google generative-language API).
-fn endpoint(api_key: &str) -> String {
-    format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={api_key}"
-    )
+/// Endpoint URL for the GA model. The API key is sent in the `x-goog-api-key`
+/// header (not the query string) so it can't leak into reqwest error Display /
+/// logs on a transport failure.
+fn endpoint() -> String {
+    format!("https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent")
 }
 
 /// Extract `candidates[0].content.parts[0].text`, trimmed.
@@ -144,8 +143,9 @@ fn generate(
         .context("failed to build reqwest client")?;
 
     let response = client
-        .post(endpoint(api_key))
+        .post(endpoint())
         .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header("x-goog-api-key", api_key)
         .body(body_str)
         .send()
         .context("Gemini request failed")?;
@@ -240,10 +240,11 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_uses_ga_model_and_key() {
-        let url = endpoint("SECRET_KEY");
+    fn endpoint_uses_ga_model_and_no_key_in_url() {
+        let url = endpoint();
         assert!(url.contains("gemini-3.5-flash:generateContent"));
-        assert!(url.contains("key=SECRET_KEY"));
+        // The key must NOT be in the URL — it travels in the x-goog-api-key header.
+        assert!(!url.contains("key="));
         assert!(url.starts_with(
             "https://generativelanguage.googleapis.com/v1beta/models/"
         ));

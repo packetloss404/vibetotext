@@ -26,7 +26,10 @@
 //! `tauri::Builder::macos_private_api`) or this window will render with an
 //! opaque background on macOS. Windows/Linux only need `.transparent(true)`.
 
+use serde_json::Value;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+use crate::config::AppConfig;
 
 /// Stable label for the overlay window (used by every helper to look it up).
 const OVERLAY_LABEL: &str = "overlay";
@@ -75,7 +78,7 @@ pub fn ensure(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     // Anchor near bottom-center of the monitor the window landed on. Best-effort:
     // if monitor metrics are unavailable we leave it at the builder default.
-    position_bottom_center(&window);
+    position_from_config(&window);
 
     Ok(())
 }
@@ -86,7 +89,7 @@ pub fn show(app: &tauri::AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(OVERLAY_LABEL) {
         // Re-anchor on each show in case the display layout changed since
         // creation, then reveal + keep it on top.
-        position_bottom_center(&window);
+        position_from_config(&window);
         window.show()?;
         let _ = window.set_always_on_top(true);
     }
@@ -101,26 +104,56 @@ pub fn hide(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Position the window centered horizontally and near the bottom of the monitor
-/// it currently sits on (falling back to the primary monitor). Best-effort:
-/// monitor lookups can fail on some platforms/headless setups, in which case the
+/// Edge margin for the corner presets (DIPs).
+const EDGE_MARGIN: f64 = 24.0;
+
+/// Position the overlay according to `config.orb_position` (plan §8 parity item),
+/// falling back to bottom-center. Supports the five string presets the frontend
+/// offers (`top-left`, `top-right`, `bottom-left`, `bottom-right`,
+/// `bottom-center`) and a custom `{ "x": .., "y": .. }` object (absolute logical
+/// screen coordinates). Best-effort: if monitor metrics are unavailable the
 /// window keeps its builder-default position.
-fn position_bottom_center(window: &tauri::WebviewWindow) {
+fn position_from_config(window: &tauri::WebviewWindow) {
     use tauri::{LogicalPosition, LogicalSize};
 
     let monitor = match window.current_monitor() {
         Ok(Some(m)) => Some(m),
         _ => window.primary_monitor().ok().flatten(),
     };
-
     let Some(monitor) = monitor else { return };
 
     let scale = monitor.scale_factor();
     let size: LogicalSize<f64> = monitor.size().to_logical(scale);
     let origin: LogicalPosition<f64> = monitor.position().to_logical(scale);
 
-    let x = origin.x + (size.width - OVERLAY_WIDTH) / 2.0;
-    let y = origin.y + size.height - OVERLAY_HEIGHT - BOTTOM_MARGIN;
+    let left = origin.x + EDGE_MARGIN;
+    let right = origin.x + size.width - OVERLAY_WIDTH - EDGE_MARGIN;
+    let top = origin.y + EDGE_MARGIN;
+    let bottom = origin.y + size.height - OVERLAY_HEIGHT - BOTTOM_MARGIN;
+    let center_x = origin.x + (size.width - OVERLAY_WIDTH) / 2.0;
+    let bottom_center = (center_x, bottom);
+
+    let orb = AppConfig::load().ok().and_then(|c| c.orb_position);
+    let (x, y) = match orb {
+        Some(Value::String(s)) => match s.as_str() {
+            "top-left" => (left, top),
+            "top-right" => (right, top),
+            "bottom-left" => (left, bottom),
+            "bottom-right" => (right, bottom),
+            // "bottom-center" and any unknown preset fall back to center-bottom.
+            _ => bottom_center,
+        },
+        // Custom absolute logical coordinates.
+        Some(Value::Object(map)) => {
+            let cx = map.get("x").and_then(Value::as_f64);
+            let cy = map.get("y").and_then(Value::as_f64);
+            match (cx, cy) {
+                (Some(cx), Some(cy)) => (cx, cy),
+                _ => bottom_center,
+            }
+        }
+        _ => bottom_center,
+    };
 
     let _ = window.set_position(LogicalPosition::new(x, y));
 }

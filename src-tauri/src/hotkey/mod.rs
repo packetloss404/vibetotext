@@ -272,6 +272,7 @@ impl StateMachine {
     }
 
     /// Test/integration hook: is a recording currently active, and in which mode.
+    #[allow(dead_code)]
     pub fn active_mode(&self) -> Option<Mode> {
         self.active.as_ref().map(|a| a.mode)
     }

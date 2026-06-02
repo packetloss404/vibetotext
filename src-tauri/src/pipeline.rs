@@ -159,6 +159,9 @@ struct Worker {
 
 /// The currently-active recording session metadata.
 struct Active {
+    /// Mode the recording was started in. Stop is driven by the HotkeyEvent's
+    /// own mode, so this is kept as session metadata / for debugging.
+    #[allow(dead_code)]
     mode: Mode,
     /// The config snapshot captured at Start, so Stop processes with exactly the
     /// settings that were in effect when recording began (hot-apply per-utterance).
@@ -507,7 +510,7 @@ fn iso_now() -> String {
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as i64; // [0, 146096]
+    let doe = z - era * 146_097; // [0, 146096]
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]

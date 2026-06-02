@@ -105,7 +105,7 @@ pub(super) fn migrate(
 
     // Step 4 (before backfill so imported rows also get scored): import legacy
     // JSON. Done inside the txn so a failure rolls the whole thing back.
-    import_legacy_json(&tx, db_path)?;
+    let imported_json = import_legacy_json(&tx, db_path)?;
 
     // Step 3: backfill any NULL sentiment (legacy native rows + freshly imported).
     backfill_sentiment(&tx, scorer)?;
@@ -115,9 +115,12 @@ pub(super) fn migrate(
 
     tx.commit()?;
 
-    // Rename the imported JSON only after the txn commits, so we never lose the
-    // source file if the DB transaction rolled back.
-    finalize_legacy_json(db_path)?;
+    // Rename the imported JSON only after the txn commits (so we never lose the
+    // source file if the DB rolled back) AND only if we actually imported it —
+    // never rename a user's history.json when import was skipped.
+    if imported_json {
+        finalize_legacy_json(db_path)?;
+    }
 
     Ok(())
 }
@@ -187,18 +190,20 @@ fn legacy_json_path(db_path: &Path) -> PathBuf {
 
 /// Import legacy `history.json` if present AND the table is currently empty
 /// (port of `_migrate_from_json`: it bails when entries already exist).
-/// The file rename happens later in [`finalize_legacy_json`] after commit.
-fn import_legacy_json(conn: &Connection, db_path: &Path) -> Result<(), DbError> {
+/// Returns `true` only if rows were actually imported, so the caller renames the
+/// source file (via [`finalize_legacy_json`]) ONLY then — never clobbering a
+/// user's history.json when import was skipped. The rename happens after commit.
+fn import_legacy_json(conn: &Connection, db_path: &Path) -> Result<bool, DbError> {
     let json_path = legacy_json_path(db_path);
     if !json_path.exists() {
-        return Ok(());
+        return Ok(false);
     }
 
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))?;
     if count > 0 {
         // Don't migrate twice; leave the JSON in place (Python returns early and
         // does NOT rename in this case).
-        return Ok(());
+        return Ok(false);
     }
 
     let raw = std::fs::read_to_string(&json_path)?;
@@ -215,7 +220,7 @@ fn import_legacy_json(conn: &Connection, db_path: &Path) -> Result<(), DbError> 
         .unwrap_or_default();
 
     if entries.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     tracing::info!(count = entries.len(), "migrating entries from history.json");
@@ -254,7 +259,7 @@ fn import_legacy_json(conn: &Connection, db_path: &Path) -> Result<(), DbError> 
         )?;
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// After the migration transaction commits, rename the imported JSON so it is
