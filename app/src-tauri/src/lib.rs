@@ -9,12 +9,17 @@
 //! sibling builders in this same phase — a full build only links once those
 //! land (the Verify agent runs the authoritative build).
 
-// Foundational modules. `db`, `config`, and `sentiment` are owned by other
-// Phase 0 builders; only declared here.
+// Foundational modules (Phase 0).
 pub mod config;
 pub mod db;
 pub mod sentiment;
 pub mod state;
+
+// Phase 1 integration surface.
+pub mod commands;
+pub mod events;
+#[cfg(desktop)]
+pub mod tray;
 
 use state::AppState;
 use tauri::Manager;
@@ -63,14 +68,31 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             // Construct shared state and hand it to Tauri so command handlers
-            // (added in later phases) can resolve it with `State<AppState>`.
+            // can resolve it with `State<AppState>`.
             let state = AppState::new()?;
             app.manage(state);
+
+            // System tray (desktop only): app icon + Show/Quit menu.
+            #[cfg(desktop)]
+            tray::setup(app.handle())?;
 
             tracing::info!("VibeToText backend initialized");
             Ok(())
         })
-        // Phase 1+ registers IPC commands here via `.invoke_handler(...)`.
+        .invoke_handler(tauri::generate_handler![
+            commands::get_entries,
+            commands::get_statistics,
+            commands::clear_history,
+            commands::load_config,
+            commands::save_config,
+            commands::list_audio_devices,
+            commands::set_audio_device,
+            commands::get_dictionary,
+            commands::add_word,
+            commands::remove_word,
+            commands::set_whisper_model,
+            commands::set_orb_position,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running VibeToText application");
 }

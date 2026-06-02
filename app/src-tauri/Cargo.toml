@@ -21,7 +21,8 @@ path = "src/main.rs"
 tauri-build = { version = "2.6", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = [] }
+# `tray-icon` gates the `tauri::tray` API used by `src/tray.rs` (Phase 1 system tray).
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.4"
 tauri-plugin-window-state = "2.4"
 
