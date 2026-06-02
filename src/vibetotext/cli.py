@@ -55,11 +55,6 @@ def main():
         help="Hotkey to toggle history window (default: ctrl+alt)",
     )
     parser.add_argument(
-        "--viz-hotkey",
-        default="cmd+ctrl+g",
-        help="Hotkey to open Word Galaxy visualization (default: cmd+ctrl+g)",
-    )
-    parser.add_argument(
         "--codebase",
         default=None,
         help="Path to codebase for Greppy search (default: datafeeds)",
@@ -140,7 +135,6 @@ def main():
         args.cleanup_hotkey: "cleanup",
         args.plan_hotkey: "plan",
         args.history_hotkey: "history",
-        args.viz_hotkey: "viz",
     }
     listener = HotkeyListener(hotkeys=hotkeys)
 
@@ -157,7 +151,6 @@ def main():
     print(f"  [{args.cleanup_hotkey}] = cleanup/refine with Gemini")
     print(f"  [{args.plan_hotkey}] = implementation plan with Gemini")
     print(f"  [{args.history_hotkey}] = toggle history window")
-    print(f"  [{args.viz_hotkey}] = open Word Galaxy visualization")
     print("Press Ctrl+C to exit.\n")
 
     # Preload model
@@ -178,25 +171,11 @@ def main():
         else:
             print("[HISTORY] history-app/ directory not found.")
 
-    def open_viz():
-        """Open the Don't Anger the AI visualization."""
-        import subprocess
-        viz_dir = Path(__file__).parent.parent.parent / "native-app"
-        binary = viz_dir / ".build" / "debug" / "DontAngerTheAI"
-        if binary.exists():
-            subprocess.Popen([str(binary)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[VIZ] Opening Don't Anger the AI...")
-        else:
-            print("[VIZ] DontAngerTheAI binary not found. Run 'swift build' in native-app/ first.")
-
     def on_start(mode):
         try:
             # Non-recording modes: handle immediately and return
             if mode == "history":
                 open_history_app()
-                return
-            if mode == "viz":
-                open_viz()
                 return
 
             current_mode[0] = mode
@@ -227,8 +206,8 @@ def main():
 
     def on_stop(mode):
         try:
-            # Non-recording modes: nothing to do on release
-            if mode in ("history", "viz"):
+            # Non-recording mode: nothing to do on release
+            if mode == "history":
                 return
 
             stop_t0 = time.time()

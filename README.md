@@ -41,24 +41,9 @@ Press `Cmd+Comma` (macOS) or `Ctrl+Comma` (Windows) to open the **History & Sett
 - **Recent History** — Review and copy previous transcriptions.
 - **Microphone Selection** — Switch audio input devices directly from the UI.
 
-## Cosmic Visualization (macOS only)
+## Cosmic Visualization
 
-![Cosmic Visualization](docs/cosmic.png)
-
-A living 3D world that reacts to your voice in real time. As you dictate, a procedural planet grows with villagers, buildings, crops, and a tree whose leaves are your most-used words. A cosmic entity watches from a black hole in the sky — and if your sentiment turns negative, it attacks.
-
-**Hotkeys**
-- `Cmd+Ctrl+G` — Open the Word Galaxy visualization
-
-**How it works**
-- **Sentiment-driven behavior** — Your words are analyzed in real time. Positive speech keeps the world peaceful; negative sentiment triggers the cosmic entity to charge and fire lasers at your village.
-- **Procedural planet** — Villagers (farmers, scholars, builders, guards) and buildings populate a 3D planet that grows as you talk.
-- **Word tree** — Your top 500 words are assigned to leaves on a procedural tree that grows during the intro sequence.
-- **Word nebula** — Recent transcriptions float as text in a nebula cloud. Common words migrate from the nebula to the tree.
-- **Seasons & day/night** — A 15-second day/night cycle with shifting sky colors, dynamic lighting, and fireflies at night.
-- **GLB export** — Export generated 3D entities for use in external tools.
-
-> Requires macOS 14+ (Sonoma). The cosmic visualization is part of the native macOS app in `macos-native/`, built with Swift and Metal. Not available on Windows or Linux.
+The voice-driven 3D game that used to ship inside this repo — **"Don't Anger the AI"** — now lives in its own repository: **[packetloss404/vibegalaxy](https://github.com/packetloss404/vibegalaxy)**.
 
 ## Install
 

@@ -60,21 +60,6 @@ def open_history_app():
         pass
 
 
-def open_viz():
-    """Open the Don't Anger the AI visualization."""
-    src_dir = Path(__file__).parent.parent.parent
-    viz_dir = src_dir / "native-app"
-    binary = viz_dir / ".build" / "debug" / "DontAngerTheAI"
-    if binary.exists():
-        try:
-            subprocess.Popen([str(binary)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[VIZ] Opening Don't Anger the AI...")
-        except Exception:
-            pass
-    else:
-        print("[VIZ] DontAngerTheAI binary not found. Run 'swift build' in native-app/ first.")
-
-
 def main():
     parser = argparse.ArgumentParser(
         description="Voice-to-text with automatic code context injection"
@@ -109,11 +94,6 @@ def main():
         "--history-hotkey",
         default="ctrl+alt",
         help="Hotkey to toggle history window (default: ctrl+alt)",
-    )
-    parser.add_argument(
-        "--viz-hotkey",
-        default="cmd+ctrl+g",
-        help="Hotkey to open Word Galaxy visualization (default: cmd+ctrl+g)",
     )
     parser.add_argument(
         "--codebase",
@@ -204,7 +184,6 @@ def main():
         args.cleanup_hotkey: "cleanup",
         args.plan_hotkey: "plan",
         args.history_hotkey: "history",
-        args.viz_hotkey: "viz",
     }
     listener = HotkeyListener(hotkeys=hotkeys)
 
@@ -260,10 +239,6 @@ def main():
             if mode == "history":
                 open_history_app()
                 return
-            # Viz mode: open Word Galaxy, don't record
-            if mode == "viz":
-                open_viz()
-                return
 
             current_mode[0] = mode
             if ui:
@@ -279,8 +254,8 @@ def main():
 
     def on_stop(mode):
         try:
-            # Non-recording modes: nothing to do on release
-            if mode in ("history", "viz"):
+            # Non-recording mode: nothing to do on release
+            if mode == "history":
                 return
 
             audio = recorder.stop()

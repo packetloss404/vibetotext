@@ -267,8 +267,8 @@ class HotkeyListener:
             _log(f"WORKER: Ignoring START({mode}), state={self._state}")
             return
 
-        # Non-recording modes: fire callback immediately, stay idle
-        if mode in ("history", "viz"):
+        # Non-recording mode: fire callback immediately, stay idle
+        if mode == "history":
             _log(f"WORKER: Instant mode={mode}, calling on_start")
             if self.on_start:
                 try:
