@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the main VibeToText window: core window controls plus single-instance / window-state plugin surface. Audio, hotkey, paste, and overlay permissions are added in later phases as those modules land.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:event:default"
+  ]
+}

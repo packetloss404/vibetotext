@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS Info.plist additions. Tauri v2 merges `src-tauri/Info.plist` into the
+  generated bundle Info.plist. Without NSMicrophoneUsageDescription the macOS
+  microphone TCC prompt is rejected, so cpal capture cannot get a grant.
+  (Accessibility for global hotkeys + synthetic paste is a separate runtime TCC
+  grant via AXIsProcessTrusted, not declared here.)
+-->
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VibeToText records from your microphone to transcribe speech to text.</string>
+</dict>
+</plist>
