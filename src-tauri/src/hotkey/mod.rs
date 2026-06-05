@@ -37,10 +37,35 @@
 pub mod permissions;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+
+/// When set, the rdev backend ignores ALL key events. Auto-paste raises this
+/// around its synthetic Ctrl/Cmd+V so the global listener doesn't see its own
+/// injected keystrokes as a fresh chord (the self-trigger feedback loop that
+/// produced spurious 0-sample recordings right after a paste).
+pub static SUPPRESS_HOTKEYS: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard that suppresses hotkey processing for its lifetime. Wrap synthetic
+/// input injection in one (see `paste::simulate_paste`). Suppression is released
+/// when the guard drops.
+pub struct SuppressGuard;
+
+impl SuppressGuard {
+    pub fn new() -> Self {
+        SUPPRESS_HOTKEYS.store(true, Ordering::SeqCst);
+        SuppressGuard
+    }
+}
+
+impl Drop for SuppressGuard {
+    fn drop(&mut self) {
+        SUPPRESS_HOTKEYS.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Push-to-talk modes. `snake_case` over serde so the wire/event form matches
 /// the rest of the IPC contract (plan §5) and the legacy mode strings.
@@ -352,7 +377,12 @@ mod rdev_impl {
             loop {
                 match rx.recv_timeout(Duration::from_millis(250)) {
                     Ok(event) => {
-                        let events = match event.event_type {
+                        // Ignore events while suppressed (our own auto-paste
+                        // injecting synthetic keys); tick() below still runs.
+                        let events = if SUPPRESS_HOTKEYS.load(Ordering::SeqCst) {
+                            Vec::new()
+                        } else {
+                            match event.event_type {
                             EventType::KeyPress(key) => {
                                 if let Some(m) = modifier_of(key) {
                                     sm.on_modifier_change(m, true)
@@ -375,6 +405,7 @@ mod rdev_impl {
                                 }
                             }
                             _ => Vec::new(),
+                            }
                         };
                         for e in events {
                             sink(e);

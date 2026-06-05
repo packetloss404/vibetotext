@@ -44,6 +44,11 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 /// instant after the user releases the chord.
 const MODIFIER_SETTLE_MS: u64 = 80;
 
+/// After the synthetic Ctrl/Cmd+V, keep the hotkey listener suppressed this long
+/// so the OS hook can deliver our own injected key events (they arrive async) and
+/// have them ignored before the listener re-enables.
+const SUPPRESS_DRAIN_MS: u64 = 60;
+
 /// The platform modifier key for the paste chord: `Cmd` on macOS, `Ctrl`
 /// elsewhere. Keeping this in one helper means the rest of the flow is OS-agnostic.
 #[cfg(target_os = "macos")]
@@ -104,6 +109,11 @@ pub fn paste_at_cursor(text: &str) -> Result<()> {
 /// `enigo`. Returns `Err` if `enigo` could not be initialized or the keystroke
 /// could not be sent — the caller treats that as a soft, clipboard-backed failure.
 fn simulate_paste() -> Result<()> {
+    // Suppress the global hotkey listener for the whole synthetic-input window so
+    // it doesn't see our own Ctrl/Cmd+V as a new chord (self-trigger loop). The
+    // guard releases suppression on drop, including on early-return errors.
+    let _suppress = crate::hotkey::SuppressGuard::new();
+
     let modifier = paste_modifier();
 
     let mut enigo =
@@ -130,6 +140,11 @@ fn simulate_paste() -> Result<()> {
     enigo
         .key(modifier, Direction::Release)
         .context("failed to release paste modifier")?;
+
+    // Drain: keep suppression on briefly so the OS hook delivers our synthetic
+    // key events (which arrive asynchronously) and they get ignored before the
+    // guard re-enables the listener.
+    std::thread::sleep(std::time::Duration::from_millis(SUPPRESS_DRAIN_MS));
 
     Ok(())
 }

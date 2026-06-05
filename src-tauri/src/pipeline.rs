@@ -121,6 +121,10 @@ pub fn start(app: &tauri::AppHandle) -> Result<()> {
         .name("vibetotext-pipeline".into())
         .spawn(move || {
             let mut worker = Worker::new(worker_app, db_path);
+            // Warm the model (download + load) BEFORE the event loop so the user's
+            // first hotkey isn't gated on a multi-hundred-MB download + model-load
+            // freeze mid-recording. Best-effort; lazy resolution still covers it.
+            worker.prewarm();
             worker.run(rx);
         })
         .context("failed to spawn pipeline worker thread")?;
@@ -285,8 +289,18 @@ impl Worker {
         }
 
         // --- Transcribe -----------------------------------------------------
+        // The very first use downloads + loads the model; surface a distinct
+        // phase so the UI doesn't look frozen. Startup prewarm usually makes this
+        // instant (the model is already resolved by the time the user records).
+        emit_pipeline_status(&self.app, "preparing_model", mode);
+        // Build/resolve the transcriber, then drop the &mut borrow before emitting
+        // (which needs &self.app) and re-borrow it immutably for the transcription.
+        self.ensure_transcriber(&config.whisper_model)?;
         emit_pipeline_status(&self.app, "transcribing", mode);
-        let transcriber = self.ensure_transcriber(&config.whisper_model)?;
+        let transcriber = self
+            .transcriber
+            .as_ref()
+            .expect("transcriber ensured above");
         // `transcribe` already strips whisper artifacts/noise markers, so `raw`
         // is the cleaned transcription.
         let raw = transcriber
@@ -435,6 +449,24 @@ impl Worker {
             .transcriber
             .as_ref()
             .expect("transcriber created above"))
+    }
+
+    /// Best-effort startup warm-up: resolve/download + load the configured model
+    /// up front (on the worker thread, before the event loop) so the first real
+    /// utterance doesn't pay the download + load cost mid-recording. Failures are
+    /// non-fatal — lazy `ensure_transcriber` retries on first use.
+    fn prewarm(&mut self) {
+        let model = AppConfig::load()
+            .map(|c| c.whisper_model)
+            .unwrap_or_else(|_| "small".to_string());
+        tracing::info!(model, "prewarming whisper model (background, pre-first-use)");
+        match self.ensure_transcriber(&model) {
+            Ok(_) => tracing::info!("whisper model ready"),
+            Err(e) => tracing::warn!(
+                error = %format!("{e:#}"),
+                "model prewarm failed; will retry on first use"
+            ),
+        }
     }
 
     /// Write a history entry (mode lowercased, with computed sentiment/wpm done
