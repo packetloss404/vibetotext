@@ -460,12 +460,23 @@ impl Worker {
             .map(|c| c.whisper_model)
             .unwrap_or_else(|_| "small".to_string());
         tracing::info!(model, "prewarming whisper model (background, pre-first-use)");
-        match self.ensure_transcriber(&model) {
-            Ok(_) => tracing::info!("whisper model ready"),
-            Err(e) => tracing::warn!(
+        if let Err(e) = self.ensure_transcriber(&model) {
+            tracing::warn!(
                 error = %format!("{e:#}"),
-                "model prewarm failed; will retry on first use"
-            ),
+                "model resolve failed during prewarm; will retry on first use"
+            );
+            return;
+        }
+        // Force the heavy WhisperContext load now (ensure_transcriber only builds
+        // the handle; the context loads lazily) so the first hotkey is instant.
+        if let Some(t) = self.transcriber.as_ref() {
+            match t.warm() {
+                Ok(()) => tracing::info!("whisper model loaded and ready"),
+                Err(e) => tracing::warn!(
+                    error = %format!("{e:#}"),
+                    "model load failed during prewarm; will retry on first use"
+                ),
+            }
         }
     }
 

@@ -362,6 +362,7 @@ mod rdev_impl {
             // a timeout to enforce the auto-cutoff while keys stay held.
             let (tx, rx) = mpsc::channel::<Event>();
             thread::spawn(move || {
+                tracing::info!("installing global hotkey hook (rdev listen)");
                 if let Err(err) = listen(move |event| {
                     let _ = tx.send(event);
                 }) {

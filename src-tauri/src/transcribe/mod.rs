@@ -45,6 +45,25 @@ impl Transcriber {
         })
     }
 
+    /// Force the (otherwise lazy) `WhisperContext` load now, so the first
+    /// `transcribe()` doesn't pay the multi-second model-load cost mid-utterance.
+    /// Used by the pipeline's startup prewarm. Idempotent.
+    pub fn warm(&self) -> Result<()> {
+        let mut guard = self
+            .ctx
+            .lock()
+            .map_err(|_| anyhow::anyhow!("whisper context mutex poisoned"))?;
+        if guard.is_none() {
+            let ctx =
+                WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default())
+                    .with_context(|| {
+                        format!("failed to load whisper model: {}", self.model_path.display())
+                    })?;
+            *guard = Some(ctx);
+        }
+        Ok(())
+    }
+
     /// Transcribe 16 kHz mono f32 samples to text.
     ///
     /// Sets `initial_prompt = build_prompt(custom_words)` (TECH_PROMPT plus the
