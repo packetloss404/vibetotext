@@ -5164,6 +5164,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "whisper-rs",
+ "windows",
 ]
 
 [[package]]

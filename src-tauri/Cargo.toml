@@ -79,6 +79,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # dependency-light server — bound to 127.0.0.1 loopback only for security.
 tiny_http = { version = "0.12", optional = true }
 
+# Windows-only: resolve full WASAPI capture-endpoint names ("Headset (PLT Focus)")
+# for the mic picker, since cpal reports generic short names ("Headset"). The
+# crate is already in the dependency tree via tauri/wry (0.61); this just enables
+# the audio-enumeration features. See audio/devices.rs::full_endpoint_names.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+  "Win32_Devices_FunctionDiscovery",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_Foundation",
+] }
+
 # GPU acceleration is scaffolded but OFF by default (CPU-only MVP). Each flag
 # forwards to the matching whisper-rs backend feature; opt-in builds only.
 [features]
