@@ -3,15 +3,10 @@
 ## Unreleased
 
 ### Added
-- **Gemini LLM integration** — New `llm.py` module that uses Google Gemini to clean up rambling voice transcriptions into clear prompts and generate structured implementation plans
-- **Window state persistence** — History app now remembers its position and size between sessions
-- **Startup/stop scripts** — `start-all.sh` and `stop-all.sh` to launch and kill both services in one command
-- `google-generativeai` and `python-dotenv` as project dependencies
-
-### Changed
-- History app now uses `history.db` instead of `history.json`
-- Startup scripts use relative paths derived from script location instead of hardcoded paths
-- Increased header top padding in history app to accommodate macOS traffic light buttons
+- **Tauri v2 rewrite** — Single cross-platform app (Rust backend + webview UI) under `src-tauri`, replacing the previous Python and multi-platform implementations
+- **Local Whisper transcription** — `whisper-rs` bindings to whisper.cpp for on-device speech-to-text (CPU by default; optional Metal/CUDA/Vulkan GPU backends)
+- **Audio capture** — `cpal` for cross-platform microphone input
+- **Global push-to-talk hotkeys** — `rdev` global hotkey listener for modifier-chord push-to-talk modes
 
 ### Removed
-- Window no longer repositions to cursor on toggle — it stays where you last placed it
+- Python implementation retired — `llm.py`, the `google-generativeai`/`python-dotenv` dependencies, the standalone history app, and the `start-all.sh`/`stop-all.sh` startup scripts are gone, folded into the single Tauri app
