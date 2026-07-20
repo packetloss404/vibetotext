@@ -1,8 +1,13 @@
-# VibeToText
+# PacketVoice
 
 Voice-to-text for developers: hold a hotkey, speak, and the cleaned-up text is
 pasted at your cursor — with local Whisper transcription, AI cleanup/planning,
 semantic code search, and a detailed analytics dashboard.
+
+> **Lineage:** originally created as **VibeToText** by Dylan ([dyoburon](https://github.com/dyoburon));
+> rewritten (single Tauri v2 app, Rust VADER port, native Windows/macOS builds) and continued
+> as **PacketVoice** by Ian Walmsley ([packetloss404](https://github.com/packetloss404)) since 2026.
+> MIT licensed; full commit history and authorship preserved.
 
 A single cross-platform **Tauri v2** app (Rust backend + webview UI) for
 **Windows, macOS, and Linux**. It replaces the four previous implementations
