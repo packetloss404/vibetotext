@@ -79,8 +79,7 @@ pub fn paste_at_cursor(text: &str) -> Result<()> {
 
     // (1) Clipboard first — the load-bearing step. If this fails there is no
     // fallback, so it is the one genuinely hard error.
-    let mut clipboard =
-        arboard::Clipboard::new().context("failed to open the system clipboard")?;
+    let mut clipboard = arboard::Clipboard::new().context("failed to open the system clipboard")?;
     clipboard
         .set_text(text)
         .context("failed to write text to the system clipboard")?;
@@ -161,7 +160,7 @@ fn notify_manual_paste_needed() {
     // The pipeline/event layer (Phase 4) can subscribe to this target to raise a
     // user-facing toast. Kept dependency-free so paste.rs stays self-contained.
     tracing::warn!(
-        target: "vibetotext::user_notification",
+        target: "packetvoice::user_notification",
         "transcription copied to clipboard — auto-paste failed, paste manually (Ctrl/Cmd+V)"
     );
 }

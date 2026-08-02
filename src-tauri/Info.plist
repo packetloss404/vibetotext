@@ -10,6 +10,6 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VibeToText records from your microphone to transcribe speech to text.</string>
+    <string>PacketVoice records from your microphone to transcribe speech to text.</string>
 </dict>
 </plist>

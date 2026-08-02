@@ -39,7 +39,8 @@
 //! next push-to-talk still works (parity with `cli.py`'s per-callback
 //! try/except that logs to `vibetotext_crash.log` and continues).
 
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use anyhow::{Context, Result};
@@ -50,6 +51,7 @@ use crate::audio::recorder::Recorder;
 use crate::config::AppConfig;
 use crate::db::Db;
 use crate::hotkey::{self, HotkeyEvent, Mode};
+use crate::state::{PIPELINE_IDLE, PIPELINE_PREPARING, PIPELINE_PROCESSING, PIPELINE_RECORDING};
 use crate::transcribe::Transcriber;
 use crate::{events, greppy, llm, models, overlay, paste};
 
@@ -66,7 +68,8 @@ struct RecordingState {
 #[derive(Serialize, Clone)]
 struct PipelineStatus<'a> {
     phase: &'a str,
-    mode: Mode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mode: Option<Mode>,
 }
 
 /// Emit `recording-state{recording, mode}`. Errors are logged, never propagated:
@@ -78,7 +81,7 @@ fn emit_recording_state(app: &tauri::AppHandle, recording: bool, mode: Option<Mo
 }
 
 /// Emit `pipeline-status{phase, mode}` for the current processing stage.
-fn emit_pipeline_status(app: &tauri::AppHandle, phase: &str, mode: Mode) {
+fn emit_pipeline_status(app: &tauri::AppHandle, phase: &str, mode: Option<Mode>) {
     if let Err(e) = app.emit(events::PIPELINE_STATUS, PipelineStatus { phase, mode }) {
         tracing::warn!(error = %e, "failed to emit pipeline-status event");
     }
@@ -92,6 +95,9 @@ const CONTEXT_LIMIT: usize = 5;
 /// default of 10).
 const GREPPY_LIMIT: usize = 10;
 
+// Shared admission state between the hotkey callback and the worker. The
+// listener still tracks physical chord state, but events are admitted only when
+// the pipeline can act on them immediately; stale speech is never replayed.
 /// Start the pipeline orchestrator.
 ///
 /// Spawns the worker thread (owner of the `!Send` recorder + lazy transcriber)
@@ -102,6 +108,11 @@ const GREPPY_LIMIT: usize = 10;
 /// This is the Phase-4 contract entry point called from `lib.rs`'s `setup`.
 pub fn start(app: &tauri::AppHandle) -> Result<()> {
     let (tx, rx) = mpsc::channel::<HotkeyEvent>();
+    let phase = app
+        .try_state::<crate::state::AppState>()
+        .map(|state| Arc::clone(&state.pipeline_phase))
+        .unwrap_or_else(|| Arc::new(AtomicU8::new(PIPELINE_PREPARING)));
+    phase.store(PIPELINE_PREPARING, Ordering::Release);
 
     // Resolve the history DB path once, up front, from managed state (falls back
     // to ~/.vibetotext/history.db if state isn't available for some reason).
@@ -117,27 +128,77 @@ pub fn start(app: &tauri::AppHandle) -> Result<()> {
 
     // Worker thread: sole owner of the recorder + transcriber, FIFO consumer.
     let worker_app = app.clone();
+    let worker_phase = Arc::clone(&phase);
     thread::Builder::new()
-        .name("vibetotext-pipeline".into())
+        .name("packetvoice-pipeline".into())
         .spawn(move || {
-            let mut worker = Worker::new(worker_app, db_path);
+            let mut worker = Worker::new(worker_app, db_path, worker_phase);
             // Warm the model (download + load) BEFORE the event loop so the user's
             // first hotkey isn't gated on a multi-hundred-MB download + model-load
             // freeze mid-recording. Best-effort; lazy resolution still covers it.
-            worker.prewarm();
+            emit_pipeline_status(&worker.app, "preparing_model", None);
+            let model_ready = worker.prewarm();
+            worker.phase.store(PIPELINE_IDLE, Ordering::Release);
+            emit_pipeline_status(
+                &worker.app,
+                if model_ready {
+                    "ready"
+                } else {
+                    "model_unavailable"
+                },
+                None,
+            );
             worker.run(rx);
         })
         .context("failed to spawn pipeline worker thread")?;
 
     // Hotkey listener thread: rdev listen() on its own thread; only SENDS into
     // the channel, never blocks on recording/transcription.
-    hotkey::spawn(move |evt| {
+    let admission_app = app.clone();
+    let permission_ready = hotkey::spawn(move |evt| {
+        let admitted = match evt {
+            HotkeyEvent::Start(_) => phase
+                .compare_exchange(
+                    PIPELINE_IDLE,
+                    PIPELINE_RECORDING,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok(),
+            HotkeyEvent::Stop(_) => phase
+                .compare_exchange(
+                    PIPELINE_RECORDING,
+                    PIPELINE_PROCESSING,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok(),
+        };
+
+        if !admitted {
+            if let HotkeyEvent::Start(mode) = evt {
+                let current = phase.load(Ordering::Acquire);
+                let status = if current == PIPELINE_PREPARING {
+                    "not_ready"
+                } else {
+                    "busy"
+                };
+                emit_pipeline_status(&admission_app, status, Some(mode));
+                tracing::info!(?mode, status, "hotkey ignored while pipeline unavailable");
+            }
+            return;
+        }
+
         if let Err(e) = tx.send(evt) {
+            phase.store(PIPELINE_IDLE, Ordering::Release);
             // The only way this fails is the worker (receiver) having gone away,
             // which means the process is shutting down — nothing actionable.
             tracing::debug!(error = %e, "pipeline channel closed; dropping hotkey event");
         }
     });
+    if !permission_ready {
+        events::emit_permission_needed(app, "accessibility");
+    }
 
     tracing::info!("pipeline orchestrator started");
     Ok(())
@@ -159,6 +220,7 @@ struct Worker {
     /// `Some(mode)` while a recording is active (RECORDING state). `None` is IDLE.
     /// During PROCESSING this is `None` (the recording has been stopped).
     active: Option<Active>,
+    phase: Arc<AtomicU8>,
 }
 
 /// The currently-active recording session metadata.
@@ -173,7 +235,7 @@ struct Active {
 }
 
 impl Worker {
-    fn new(app: tauri::AppHandle, db_path: std::path::PathBuf) -> Self {
+    fn new(app: tauri::AppHandle, db_path: std::path::PathBuf, phase: Arc<AtomicU8>) -> Self {
         Self {
             app,
             db_path,
@@ -181,6 +243,7 @@ impl Worker {
             transcriber: None,
             transcriber_model: None,
             active: None,
+            phase,
         }
     }
 
@@ -194,15 +257,20 @@ impl Worker {
                 HotkeyEvent::Start(mode) => {
                     if let Err(e) = self.handle_start(mode) {
                         tracing::error!(?mode, error = %format!("{e:#}"), "pipeline Start failed");
+                        emit_pipeline_status(&self.app, "failed", Some(mode));
                         // Best-effort UI cleanup so a failed Start doesn't leave
                         // the overlay stuck on screen.
                         self.abort_recording_ui();
                         self.active = None;
+                        self.phase.store(PIPELINE_IDLE, Ordering::Release);
+                    } else if mode == Mode::History {
+                        self.phase.store(PIPELINE_IDLE, Ordering::Release);
                     }
                 }
                 HotkeyEvent::Stop(mode) => {
                     if let Err(e) = self.handle_stop(mode) {
                         tracing::error!(?mode, error = %format!("{e:#}"), "pipeline Stop failed (utterance aborted)");
+                        emit_pipeline_status(&self.app, "failed", Some(mode));
                         // Failure aborts THIS utterance only: clean up UI, drop
                         // any partial recording, and keep the worker running.
                         let _ = self.recorder.stop();
@@ -210,6 +278,7 @@ impl Worker {
                     }
                     // Whether Stop succeeded or failed, we are back to IDLE.
                     self.active = None;
+                    self.phase.store(PIPELINE_IDLE, Ordering::Release);
                 }
             }
         }
@@ -247,9 +316,13 @@ impl Worker {
         // It only forwards the 25 bars to the frontend overlay via an event.
         let app_for_levels = self.app.clone();
         self.recorder
-            .start(config.audio_device_index, move |bars| {
-                events::emit_waveform_levels(&app_for_levels, bars);
-            })
+            .start(
+                config.audio_device_index,
+                config.audio_device_name.as_deref(),
+                move |bars| {
+                    events::emit_waveform_levels(&app_for_levels, bars);
+                },
+            )
             .context("starting audio recorder")?;
 
         self.active = Some(Active { mode, config });
@@ -292,11 +365,11 @@ impl Worker {
         // The very first use downloads + loads the model; surface a distinct
         // phase so the UI doesn't look frozen. Startup prewarm usually makes this
         // instant (the model is already resolved by the time the user records).
-        emit_pipeline_status(&self.app, "preparing_model", mode);
+        emit_pipeline_status(&self.app, "preparing_model", Some(mode));
         // Build/resolve the transcriber, then drop the &mut borrow before emitting
         // (which needs &self.app) and re-borrow it immutably for the transcription.
         self.ensure_transcriber(&config.whisper_model)?;
-        emit_pipeline_status(&self.app, "transcribing", mode);
+        emit_pipeline_status(&self.app, "transcribing", Some(mode));
         let transcriber = self
             .transcriber
             .as_ref()
@@ -317,7 +390,7 @@ impl Worker {
         let final_text = self.apply_mode(mode, &raw, &config);
 
         // --- History write (with VADER sentiment, computed inside Db) --------
-        emit_pipeline_status(&self.app, "saving", mode);
+        emit_pipeline_status(&self.app, "saving", Some(mode));
         if let Err(e) = self.save_history(&raw, mode, duration_seconds) {
             // A history-write failure must not block the paste — log and proceed
             // so the user still gets their text (parity with cli.py ordering,
@@ -328,10 +401,10 @@ impl Worker {
         }
 
         // --- Paste at cursor ------------------------------------------------
-        emit_pipeline_status(&self.app, "pasting", mode);
+        emit_pipeline_status(&self.app, "pasting", Some(mode));
         paste::paste_at_cursor(&final_text).context("pasting at cursor")?;
 
-        emit_pipeline_status(&self.app, "done", mode);
+        emit_pipeline_status(&self.app, "done", Some(mode));
         tracing::info!(?mode, "utterance complete");
         Ok(())
     }
@@ -344,7 +417,7 @@ impl Worker {
             // Transcribe: raw, optionally with greppy code-context appended.
             Mode::Transcribe => {
                 if let Some(codebase) = config.codebase_path.as_deref() {
-                    emit_pipeline_status(&self.app, "searching_context", mode);
+                    emit_pipeline_status(&self.app, "searching_context", Some(mode));
                     // greppy collapses missing-binary / error / no-hits into None.
                     match greppy::code_context(raw, std::path::Path::new(codebase), CONTEXT_LIMIT) {
                         Some(ctx) if !ctx.is_empty() => format!("{raw}{ctx}"),
@@ -357,7 +430,7 @@ impl Worker {
 
             // Cleanup: Gemini refine, fall back to raw on missing key / error.
             Mode::Cleanup => {
-                emit_pipeline_status(&self.app, "cleaning_up", mode);
+                emit_pipeline_status(&self.app, "cleaning_up", Some(mode));
                 match config.gemini_api_key() {
                     Some(key) => match llm::cleanup_text(raw, &key) {
                         Ok(text) if !text.trim().is_empty() => text,
@@ -379,7 +452,7 @@ impl Worker {
 
             // Plan: Gemini implementation plan, fall back to raw.
             Mode::Plan => {
-                emit_pipeline_status(&self.app, "generating_plan", mode);
+                emit_pipeline_status(&self.app, "generating_plan", Some(mode));
                 match config.gemini_api_key() {
                     Some(key) => match llm::generate_plan(raw, &key) {
                         Ok(text) if !text.trim().is_empty() => text,
@@ -402,10 +475,14 @@ impl Worker {
             // Greppy: attach relevant files; fall back to raw if no codebase /
             // no greppy binary / error.
             Mode::Greppy => {
-                emit_pipeline_status(&self.app, "searching_files", mode);
+                emit_pipeline_status(&self.app, "searching_files", Some(mode));
                 match config.codebase_path.as_deref() {
                     Some(codebase) => {
-                        match greppy::greppy_files(raw, std::path::Path::new(codebase), GREPPY_LIMIT) {
+                        match greppy::greppy_files(
+                            raw,
+                            std::path::Path::new(codebase),
+                            GREPPY_LIMIT,
+                        ) {
                             Some(ctx) if !ctx.is_empty() => format!("{raw}{ctx}"),
                             _ => {
                                 tracing::info!(
@@ -455,29 +532,39 @@ impl Worker {
     /// up front (on the worker thread, before the event loop) so the first real
     /// utterance doesn't pay the download + load cost mid-recording. Failures are
     /// non-fatal — lazy `ensure_transcriber` retries on first use.
-    fn prewarm(&mut self) {
+    fn prewarm(&mut self) -> bool {
         let model = AppConfig::load()
             .map(|c| c.whisper_model)
             .unwrap_or_else(|_| "small".to_string());
-        tracing::info!(model, "prewarming whisper model (background, pre-first-use)");
+        tracing::info!(
+            model,
+            "prewarming whisper model (background, pre-first-use)"
+        );
         if let Err(e) = self.ensure_transcriber(&model) {
             tracing::warn!(
                 error = %format!("{e:#}"),
                 "model resolve failed during prewarm; will retry on first use"
             );
-            return;
+            return false;
         }
         // Force the heavy WhisperContext load now (ensure_transcriber only builds
         // the handle; the context loads lazily) so the first hotkey is instant.
         if let Some(t) = self.transcriber.as_ref() {
-            match t.warm() {
-                Ok(()) => tracing::info!("whisper model loaded and ready"),
-                Err(e) => tracing::warn!(
+            return match t.warm() {
+                Ok(()) => {
+                    tracing::info!("whisper model loaded and ready");
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(
                     error = %format!("{e:#}"),
                     "model load failed during prewarm; will retry on first use"
-                ),
-            }
+                    );
+                    false
+                }
+            };
         }
+        false
     }
 
     /// Write a history entry (mode lowercased, with computed sentiment/wpm done
@@ -524,7 +611,7 @@ fn mode_str_lowercase(mode: Mode) -> &'static str {
     }
 }
 
-/// Current time as an ISO-8601 UTC timestamp `YYYY-MM-DDTHH:MM:SS`.
+/// Current time as an ISO-8601 UTC timestamp `YYYY-MM-DDTHH:MM:SSZ`.
 ///
 /// Dependency-free (no `chrono`/`time` direct dep): derived from `SystemTime`
 /// via the civil-date algorithm. Stored as a lexically-sortable string so the
@@ -545,7 +632,7 @@ fn iso_now() -> String {
     let sec = rem % 60;
 
     let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}")
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
 }
 
 /// Convert days since the Unix epoch (1970-01-01) to a `(year, month, day)`
@@ -579,13 +666,14 @@ mod tests {
     #[test]
     fn iso_now_has_expected_shape() {
         let s = iso_now();
-        // YYYY-MM-DDTHH:MM:SS == 19 chars.
-        assert_eq!(s.len(), 19, "got {s}");
+        // YYYY-MM-DDTHH:MM:SSZ == 20 chars and is explicitly UTC.
+        assert_eq!(s.len(), 20, "got {s}");
         assert_eq!(&s[4..5], "-");
         assert_eq!(&s[7..8], "-");
         assert_eq!(&s[10..11], "T");
         assert_eq!(&s[13..14], ":");
         assert_eq!(&s[16..17], ":");
+        assert!(s.ends_with('Z'));
     }
 
     #[test]

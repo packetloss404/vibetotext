@@ -90,7 +90,12 @@ impl Recorder {
     ///
     /// The captured audio is resampled to 16 kHz mono f32 and accumulated; call
     /// [`stop`](Recorder::stop) to retrieve it.
-    pub fn start<F>(&mut self, device_index: Option<i64>, on_level: F) -> Result<()>
+    pub fn start<F>(
+        &mut self,
+        device_index: Option<i64>,
+        device_name: Option<&str>,
+        on_level: F,
+    ) -> Result<()>
     where
         F: Fn([f32; NUM_BARS]) + Send + 'static,
     {
@@ -99,7 +104,9 @@ impl Recorder {
         }
 
         let host = cpal::default_host();
-        let device = select_device(&host, device_index)?;
+        let reconciled_index =
+            crate::audio::devices::resolve_input_device_index(device_index, device_name);
+        let device = select_device(&host, reconciled_index)?;
         let device_name = device
             .description()
             .map(|d| d.name().to_string())
@@ -378,11 +385,7 @@ fn build_stream(
             err_fn,
             None,
         ),
-        other => {
-            return Err(anyhow!(
-                "unsupported input sample format: {other:?}"
-            ))
-        }
+        other => return Err(anyhow!("unsupported input sample format: {other:?}")),
     }
     .context("building cpal input stream")?;
 

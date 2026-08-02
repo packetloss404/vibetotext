@@ -22,6 +22,7 @@
 //! `_rawJson` behavior.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -184,16 +185,44 @@ impl AppConfig {
                 path: parent.to_path_buf(),
                 source,
             })?;
+            secure_directory(parent).map_err(|source| ConfigError::Write {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
 
-        let mut json =
-            serde_json::to_string_pretty(self).map_err(|source| ConfigError::Serialize { source })?;
+        let mut json = serde_json::to_string_pretty(self)
+            .map_err(|source| ConfigError::Serialize { source })?;
         json.push('\n');
 
-        std::fs::write(path, json).map_err(|source| ConfigError::Write {
+        let mut file = atomic_write_file::AtomicWriteFile::open(path).map_err(|source| {
+            ConfigError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+        file.write_all(json.as_bytes())
+            .map_err(|source| ConfigError::Write {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        file.commit().map_err(|source| ConfigError::Write {
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |source| ConfigError::Write {
+                    path: path.to_path_buf(),
+                    source,
+                },
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Resolve the Gemini API key by precedence (per migration plan §3):
@@ -205,6 +234,115 @@ impl AppConfig {
     pub fn gemini_api_key(&self) -> Option<String> {
         let dotenv = Self::data_dir().ok().map(|d| d.join(".env"));
         self.resolve_gemini_key(dotenv.as_deref())
+    }
+
+    /// Report where the effective Gemini key comes from without exposing it to
+    /// the webview or logs.
+    pub fn gemini_key_source(&self) -> Option<&'static str> {
+        if env_nonempty("GEMINI_API_KEY").is_some() || env_nonempty("GOOGLE_API_KEY").is_some() {
+            return Some("environment");
+        }
+        if Self::data_dir()
+            .ok()
+            .is_some_and(|dir| dotenv_lookup(&dir.join(".env")).is_some())
+        {
+            return Some("PacketVoice settings");
+        }
+        self.gemini_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(|_| "legacy config")
+    }
+
+    /// Store or clear the key managed by PacketVoice in its private `.env`
+    /// file. Existing unrelated variables and comments are preserved.
+    pub fn set_managed_gemini_api_key(key: Option<&str>) -> Result<(), ConfigError> {
+        let dir = Self::data_dir()?;
+        std::fs::create_dir_all(&dir).map_err(|source| ConfigError::CreateDir {
+            path: dir.clone(),
+            source,
+        })?;
+        secure_directory(&dir).map_err(|source| ConfigError::Write {
+            path: dir.clone(),
+            source,
+        })?;
+
+        let path = dir.join(".env");
+        let contents = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(source) => {
+                return Err(ConfigError::Read {
+                    path: path.clone(),
+                    source,
+                })
+            }
+        };
+        let mut lines: Vec<String> = contents
+            .lines()
+            .filter(|line| !is_dotenv_assignment(line, "GEMINI_API_KEY"))
+            .map(str::to_string)
+            .collect();
+        if let Some(key) = key {
+            lines.push(format!("GEMINI_API_KEY={key}"));
+        }
+        let mut output = lines.join("\n");
+        if !output.is_empty() {
+            output.push('\n');
+        }
+
+        let mut file = atomic_write_file::AtomicWriteFile::open(&path).map_err(|source| {
+            ConfigError::Write {
+                path: path.clone(),
+                source,
+            }
+        })?;
+        file.write_all(output.as_bytes())
+            .map_err(|source| ConfigError::Write {
+                path: path.clone(),
+                source,
+            })?;
+        file.commit().map_err(|source| ConfigError::Write {
+            path: path.clone(),
+            source,
+        })?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |source| ConfigError::Write {
+                    path: path.clone(),
+                    source,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Move the deprecated `config.json` key into the private `.env` store.
+    /// This runs before the pipeline starts, so no concurrent config reader can
+    /// observe the two-file migration halfway through.
+    pub fn migrate_legacy_gemini_key() -> Result<bool, ConfigError> {
+        let mut config = Self::load()?;
+        let Some(key) = config
+            .gemini_api_key
+            .take()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty())
+        else {
+            return Ok(false);
+        };
+
+        let dotenv_has_key = Self::data_dir()
+            .ok()
+            .is_some_and(|dir| dotenv_lookup(&dir.join(".env")).is_some());
+        if !dotenv_has_key {
+            Self::set_managed_gemini_api_key(Some(&key))?;
+        }
+        config.save()?;
+        Ok(true)
     }
 
     /// Precedence resolution with an explicit `.env` path (testable seam).
@@ -227,6 +365,27 @@ impl AppConfig {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     }
+}
+
+fn is_dotenv_assignment(line: &str, expected_key: &str) -> bool {
+    let line = line
+        .trim()
+        .strip_prefix("export ")
+        .unwrap_or(line.trim())
+        .trim_start();
+    line.split_once('=')
+        .is_some_and(|(key, _)| key.trim() == expected_key)
+}
+
+fn secure_directory(path: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Read an env var, returning `None` for missing or blank values.
@@ -324,6 +483,26 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_only_the_managed_dotenv_assignment() {
+        assert!(is_dotenv_assignment(
+            "GEMINI_API_KEY=value",
+            "GEMINI_API_KEY"
+        ));
+        assert!(is_dotenv_assignment(
+            " export GEMINI_API_KEY = value",
+            "GEMINI_API_KEY"
+        ));
+        assert!(!is_dotenv_assignment(
+            "GOOGLE_API_KEY=value",
+            "GEMINI_API_KEY"
+        ));
+        assert!(!is_dotenv_assignment(
+            "# GEMINI_API_KEY=value",
+            "GEMINI_API_KEY"
+        ));
+    }
+
+    #[test]
     fn roundtrip_preserves_unknown_key() {
         let dir = tmp_path("roundtrip");
         let path = dir.join("config.json");
@@ -354,10 +533,12 @@ mod tests {
 
         // Save, reload: unknown keys must survive.
         cfg.save_to(&path).expect("save");
-        let reread: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let reread: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(reread["future_feature_flag"], json!(true));
-        assert_eq!(reread["some_other_writers_key"], json!({"nested": [1, 2, 3]}));
+        assert_eq!(
+            reread["some_other_writers_key"],
+            json!({"nested": [1, 2, 3]})
+        );
         assert_eq!(reread["whisper_model"], json!("medium"));
         assert_eq!(reread["orb_position"], json!({"x": 12, "y": 34}));
 
@@ -374,8 +555,7 @@ mod tests {
         let cfg = AppConfig::load_from(&path).unwrap();
         assert_eq!(cfg.orb_position, Some(json!("bottom-center")));
         cfg.save_to(&path).unwrap();
-        let reread: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let reread: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(reread["orb_position"], json!("bottom-center"));
 
         let _ = std::fs::remove_dir_all(&dir);

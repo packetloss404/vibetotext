@@ -9,7 +9,8 @@
 ///
 /// Copied verbatim from `transcriber.py`'s `TECH_PROMPT` so transcription
 /// quality matches the reference implementations exactly.
-pub const TECH_PROMPT: &str = "This is a software engineer dictating code and technical documentation.\n\
+pub const TECH_PROMPT: &str =
+    "This is a software engineer dictating code and technical documentation.\n\
 They frequently discuss: APIs, databases, frontend frameworks, backend services,\n\
 cloud infrastructure, and AI/ML systems. Use programming terminology and proper\n\
 capitalization for technical terms.\n\
@@ -88,8 +89,8 @@ mod tests {
 
     #[test]
     fn single_custom_word_has_no_trailing_comma() {
-        let words = vec!["VibeToText".to_string()];
+        let words = vec!["PacketVoice".to_string()];
         let prompt = build_prompt(&words);
-        assert!(prompt.contains("exactly as spelled: VibeToText."));
+        assert!(prompt.contains("exactly as spelled: PacketVoice."));
     }
 }

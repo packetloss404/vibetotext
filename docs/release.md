@@ -1,4 +1,4 @@
-# VibeToText Release Guide
+# PacketVoice Release Guide
 
 How to build, sign, and ship the Tauri app. Reflects the actual config in
 `src-tauri/` (`Cargo.toml`, `tauri.conf.json`). For the design rationale see
@@ -37,7 +37,7 @@ How to build, sign, and ship the Tauri app. Reflects the actual config in
   sudo apt-get install -y \
     libwebkit2gtk-4.1-dev libgtk-3-dev \
     libayatana-appindicator3-dev librsvg2-dev \
-    build-essential cmake pkg-config
+    libasound2-dev build-essential cmake pkg-config
   ```
   (X11/XWayland is the supported path — `rdev` global hotkeys are X11-only;
   native Wayland is a documented follow-up.)
@@ -76,6 +76,10 @@ The localhost HTTP transcription endpoint (`local_api.rs`) is feature-gated and
 cargo tauri build --features local-api
 ```
 
+The endpoint refuses to start unless `PACKETVOICE_LOCAL_API_TOKEN` is set. Send
+that value as `Authorization: Bearer <token>` on every request. Requests are
+limited to 32 MiB and five minutes of 16 kHz mono audio.
+
 ## 3. Bundle outputs (per OS)
 
 `bundle.targets` in `tauri.conf.json` is the explicit array
@@ -89,7 +93,7 @@ targets the host OS supports. Outputs land under
 | macOS | `.app` and `.dmg` |
 | Linux | `.deb` and `.AppImage` |
 
-Product name is **VibeToText**, identifier `com.vibetotext.app`, version from
+Product name is **PacketVoice**, identifier `com.packetvoice.app`, version from
 `tauri.conf.json` (keep it in sync with `Cargo.toml`).
 
 ## 4. Code signing & notarization
@@ -113,10 +117,10 @@ Product name is **VibeToText**, identifier `com.vibetotext.app`, version from
    `APPLE_SIGNING_IDENTITY` (+ keychain) is present.
 4. Notarize and staple:
    ```sh
-   xcrun notarytool submit VibeToText_*.dmg \
+   xcrun notarytool submit PacketVoice_*.dmg \
      --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
      --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-   xcrun stapler staple VibeToText_*.dmg
+   xcrun stapler staple PacketVoice_*.dmg
    ```
 
 ### Windows (Authenticode)
@@ -125,7 +129,7 @@ Sign the `.msi` and NSIS `.exe` with `signtool` (Authenticode cert):
 
 ```bat
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
-  /f cert.pfx /p %CERT_PASSWORD% "VibeToText_*.msi"
+  /f cert.pfx /p %CERT_PASSWORD% "PacketVoice_*.msi"
 ```
 
 A code-signing cert with established reputation reduces **SmartScreen** warnings;
@@ -137,13 +141,13 @@ new certs may still warn until reputation builds.
 publish a `.sig` + public key:
 
 ```sh
-gpg --armor --detach-sign VibeToText_*.AppImage
+gpg --armor --detach-sign PacketVoice_*.AppImage
 ```
 
 ## 5. CI secrets
 
-The release CI workflow (`.github/workflows/tauri-release.yml`) expects these
-GitHub Actions secrets:
+The release workflow contains placeholders for these credentials; do not
+promote its draft artifacts until the signing paths are wired and verified:
 
 | Secret | Purpose |
 |---|---|
@@ -171,8 +175,9 @@ GitHub Actions secrets:
 `~/.vibetotext/models/ggml-<model>.bin`; if missing it streams the file from the
 canonical Hugging Face repo
 `ggerganov/whisper.cpp` (`…/resolve/main/ggml-<model>.bin`) to a
-`*.downloading` temp file and atomically renames it into place, so an
-interrupted download never leaves a corrupt model. `<model>` is a size token such
+`*.downloading` temp file, verifies its pinned byte length and SHA-1, and only
+then atomically renames it into place. Existing caches are verified once and
+marked. `<model>` is a size token such
 as `tiny`, `base`, `small`, `medium`, `large-v3`, or `large-v3-turbo`. This keeps
 installers small and identical across platforms; users need network access on
 first run.
@@ -183,5 +188,6 @@ first run.
    `src-tauri/tauri.conf.json`.
 2. Build per OS (§2); for macOS/Windows sign + (macOS) notarize (§4).
 3. Verify bundles install and the app launches (first-run downloads a model).
-4. Tag `vX.Y.Z` and push — CI builds the matrix and attaches the bundles to the
-   GitHub Release.
+4. Run `cargo fmt --all -- --check`, `cargo clippy --all-targets --features local-api -- -D warnings`, and both default/local-api test suites.
+5. Tag `vX.Y.Z` and push — CI repeats the cross-platform quality matrix before
+   attaching bundles to a draft GitHub Release.

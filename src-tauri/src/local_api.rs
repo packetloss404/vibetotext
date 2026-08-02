@@ -7,9 +7,9 @@
 //!
 //! ## Security
 //! The server binds to `127.0.0.1` (loopback) on a fixed port **only** — never
-//! to `0.0.0.0` — so it is unreachable from other machines. This is the entire
-//! security model: no auth, loopback isolation only. Do NOT change the bind
-//! address to a non-loopback interface.
+//! to `0.0.0.0` — and requires a bearer token from
+//! `PACKETVOICE_LOCAL_API_TOKEN`. Do NOT change the bind address to a
+//! non-loopback interface.
 //!
 //! ## Protocol (mirrors `socket_server.py`)
 //! The Python server spoke newline-delimited JSON over a Unix socket; this is
@@ -17,6 +17,7 @@
 //!
 //! - Request:  `POST /transcribe` with body
 //!   `{"audio_b64": "<base64 little-endian f32 samples>", "sample_rate": 16000}`
+//!   and `Authorization: Bearer <PACKETVOICE_LOCAL_API_TOKEN>`.
 //! - Success:  `200` `{"text": "...", "duration_ms": 450}`
 //! - Error:    non-2xx `{"error": "..."}`
 //!
@@ -32,6 +33,7 @@
 //! start.
 #![cfg(feature = "local-api")]
 
+use std::io::Read;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -41,8 +43,10 @@ use crate::config::AppConfig;
 use crate::models;
 use crate::transcribe::Transcriber;
 
-/// Loopback-only bind address. 127.0.0.1 (NOT 0.0.0.0) is the security boundary.
+/// Loopback-only bind address. Never expose this service on a non-loopback interface.
 const BIND_ADDR: &str = "127.0.0.1:8765";
+const MAX_REQUEST_BODY_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_AUDIO_SAMPLES: usize = 16_000 * 60 * 5;
 
 /// Request body for `POST /transcribe` (mirrors `socket_server.py`'s payload).
 #[derive(Debug, Deserialize)]
@@ -85,6 +89,11 @@ struct ErrorResponse {
 /// so a future revision can pull live state (shared model, config watcher) off
 /// the [`tauri::AppHandle`] without a signature change.
 pub fn start(_app: &tauri::AppHandle) -> Result<()> {
+    let token = std::env::var("PACKETVOICE_LOCAL_API_TOKEN")
+        .ok()
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
+        .context("PACKETVOICE_LOCAL_API_TOKEN must be set when the local-api feature is enabled")?;
     // Bind eagerly so a port conflict surfaces to the caller now, not later in
     // the worker thread where it could only be logged.
     let server = tiny_http::Server::http(BIND_ADDR)
@@ -108,17 +117,20 @@ pub fn start(_app: &tauri::AppHandle) -> Result<()> {
         .unwrap_or_default();
 
     std::thread::Builder::new()
-        .name("local-api".into())
+        .name("packetvoice-local-api".into())
         .spawn(move || {
             // Lazily-loaded, shared across requests. The whisper context inside
             // is itself Mutex-guarded (not reentrant), so concurrent requests
             // serialize on inference — acceptable for this low-traffic endpoint.
             let transcriber: std::sync::OnceLock<Arc<Transcriber>> = std::sync::OnceLock::new();
 
-            tracing::info!(addr = BIND_ADDR, "local transcription API listening (loopback only)");
+            tracing::info!(
+                addr = BIND_ADDR,
+                "local transcription API listening (loopback only)"
+            );
 
             for request in server.incoming_requests() {
-                handle_request(request, &transcriber, &model_name, &custom_words);
+                handle_request(request, &transcriber, &model_name, &custom_words, &token);
             }
         })
         .context("failed to spawn local-api server thread")?;
@@ -132,6 +144,7 @@ fn handle_request(
     transcriber: &std::sync::OnceLock<Arc<Transcriber>>,
     model_name: &str,
     custom_words: &[String],
+    token: &str,
 ) {
     use tiny_http::Method;
 
@@ -143,9 +156,27 @@ fn handle_request(
         return;
     }
 
+    let expected = format!("Bearer {token}");
+    let authorized = request
+        .headers()
+        .iter()
+        .any(|header| header.field.equiv("Authorization") && header.value.as_str() == expected);
+    if !authorized {
+        respond_error(request, 401, "missing or invalid bearer token");
+        return;
+    }
+
     let mut body = String::new();
-    if let Err(e) = std::io::Read::read_to_string(request.as_reader(), &mut body) {
+    let read_result = request
+        .as_reader()
+        .take(MAX_REQUEST_BODY_BYTES + 1)
+        .read_to_string(&mut body);
+    if let Err(e) = read_result {
         respond_error(request, 400, &format!("failed to read request body: {e}"));
+        return;
+    }
+    if body.len() as u64 > MAX_REQUEST_BODY_BYTES {
+        respond_error(request, 413, "request body exceeds 32 MiB limit");
         return;
     }
 
@@ -163,12 +194,17 @@ fn transcribe_from_json(
     model_name: &str,
     custom_words: &[String],
 ) -> Result<TranscribeResponse> {
-    let req: TranscribeRequest =
-        serde_json::from_str(body).context("invalid JSON request body")?;
+    let req: TranscribeRequest = serde_json::from_str(body).context("invalid JSON request body")?;
 
     let samples = decode_f32_samples(&req.audio_b64).context("failed to decode audio_b64")?;
     if samples.is_empty() {
         anyhow::bail!("empty audio data");
+    }
+    if samples.len() > MAX_AUDIO_SAMPLES {
+        anyhow::bail!("audio exceeds the five-minute request limit");
+    }
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        anyhow::bail!("audio contains non-finite samples");
     }
 
     // NOTE: whisper expects 16 kHz mono. The Python server passed sample_rate
@@ -192,10 +228,7 @@ fn transcribe_from_json(
             let t = init_transcriber(model_name)?;
             // Race-safe: if another thread initialized concurrently, keep theirs.
             let _ = transcriber.set(t);
-            transcriber
-                .get()
-                .expect("transcriber set above")
-                .clone()
+            transcriber.get().expect("transcriber set above").clone()
         }
     };
 
@@ -238,9 +271,8 @@ fn decode_f32_samples(audio_b64: &str) -> Result<Vec<f32>> {
 
 /// Serialize `body` to JSON and respond with the given HTTP status.
 fn respond_json<T: Serialize>(request: tiny_http::Request, status: u16, body: &T) {
-    let json = serde_json::to_string(body).unwrap_or_else(|_| {
-        r#"{"error":"failed to serialize response"}"#.to_string()
-    });
+    let json = serde_json::to_string(body)
+        .unwrap_or_else(|_| r#"{"error":"failed to serialize response"}"#.to_string());
     send(request, status, &json);
 }
 
@@ -249,8 +281,8 @@ fn respond_error(request: tiny_http::Request, status: u16, message: &str) {
     let body = ErrorResponse {
         error: message.to_string(),
     };
-    let json = serde_json::to_string(&body)
-        .unwrap_or_else(|_| r#"{"error":"unknown error"}"#.to_string());
+    let json =
+        serde_json::to_string(&body).unwrap_or_else(|_| r#"{"error":"unknown error"}"#.to_string());
     send(request, status, &json);
 }
 
@@ -266,40 +298,20 @@ fn send(request: tiny_http::Request, status: u16, json: &str) {
     }
 }
 
-/// Minimal standard-alphabet base64 decoder (RFC 4648, `+`/`/`, optional `=`
-/// padding). Self-contained so the `local-api` feature pulls in no extra crate
-/// just to decode the audio payload. Whitespace is ignored.
+/// Strict standard-alphabet base64 decoder (RFC 4648, `+`/`/`, optional `=`
+/// padding). Whitespace is ignored for newline-delimited clients.
 fn base64_decode(input: &str) -> Result<Vec<u8>> {
-    /// Map a base64 character to its 6-bit value, or `None` if not a symbol.
-    fn val(b: u8) -> Option<u8> {
-        match b {
-            b'A'..=b'Z' => Some(b - b'A'),
-            b'a'..=b'z' => Some(b - b'a' + 26),
-            b'0'..=b'9' => Some(b - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
+    use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+    use base64::Engine;
 
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    let mut acc: u32 = 0;
-    let mut nbits: u32 = 0;
-
-    for &b in input.as_bytes() {
-        if b == b'=' || b.is_ascii_whitespace() {
-            continue;
-        }
-        let v = val(b).ok_or_else(|| anyhow::anyhow!("invalid base64 character"))? as u32;
-        acc = (acc << 6) | v;
-        nbits += 6;
-        if nbits >= 8 {
-            nbits -= 8;
-            out.push((acc >> nbits) as u8);
-        }
-    }
-
-    Ok(out)
+    let compact: String = input
+        .chars()
+        .filter(|ch| !ch.is_ascii_whitespace())
+        .collect();
+    STANDARD
+        .decode(&compact)
+        .or_else(|_| STANDARD_NO_PAD.decode(&compact))
+        .context("invalid standard base64")
 }
 
 #[cfg(test)]
@@ -405,7 +417,8 @@ mod tests {
             text: "hello world".to_string(),
             duration_ms: 450,
         };
-        let v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&resp).unwrap()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&resp).unwrap()).unwrap();
         assert_eq!(v["text"], json!("hello world"));
         assert_eq!(v["duration_ms"], json!(450));
         // No stray keys.
@@ -417,7 +430,8 @@ mod tests {
         let resp = ErrorResponse {
             error: "empty audio data".to_string(),
         };
-        let v: serde_json::Value = serde_json::from_str(&serde_json::to_string(&resp).unwrap()).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&resp).unwrap()).unwrap();
         assert_eq!(v["error"], json!("empty audio data"));
         assert_eq!(v.as_object().unwrap().len(), 1);
     }
@@ -443,5 +457,14 @@ mod tests {
         let body = json!({ "audio_b64": b64, "sample_rate": 44100 }).to_string();
         let err = transcribe_from_json(&body, &cell, "small", &[]).unwrap_err();
         assert!(err.to_string().contains("unsupported sample_rate"));
+    }
+
+    #[test]
+    fn non_finite_samples_are_rejected_before_model_load() {
+        let cell = std::sync::OnceLock::new();
+        let b64 = base64_encode(&f32::NAN.to_le_bytes());
+        let body = json!({ "audio_b64": b64, "sample_rate": 16000 }).to_string();
+        let err = transcribe_from_json(&body, &cell, "small", &[]).unwrap_err();
+        assert!(err.to_string().contains("non-finite"));
     }
 }

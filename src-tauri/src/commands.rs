@@ -20,12 +20,32 @@
 //! via `#[serde(flatten)]`, a focused setter never clobbers other writers' keys.
 
 use serde_json::Value;
+use std::sync::{Mutex, MutexGuard};
 use tauri::State;
 
 use crate::audio::devices::{list_input_devices, AudioDevice};
 use crate::config::AppConfig;
 use crate::db::{Db, Entry, Statistics};
 use crate::state::AppState;
+
+static CONFIG_MUTATION_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config_mutation() -> Result<MutexGuard<'static, ()>, String> {
+    CONFIG_MUTATION_LOCK
+        .lock()
+        .map_err(|_| "config mutation lock poisoned".to_string())
+}
+
+fn cfg_for_frontend(cfg: &AppConfig) -> Result<Value, String> {
+    let mut value = serde_json::to_value(cfg).map_err(|e| e.to_string())?;
+    if let Value::Object(ref mut map) = value {
+        // A key stored in config.json must never be reflected into the webview.
+        // Environment/.env keys were already private; keep the lowest-precedence
+        // config source private as well.
+        map.remove("gemini_api_key");
+    }
+    Ok(value)
+}
 
 /// Open the history database from the managed app-data dir.
 ///
@@ -86,54 +106,32 @@ pub fn get_statistics(
     db.get_statistics().map_err(|e| e.to_string())
 }
 
+/// Return the current pipeline readiness/admission state so a newly-loaded
+/// dashboard cannot miss the startup status event.
+#[tauri::command]
+pub fn get_pipeline_status(state: State<'_, AppState>) -> String {
+    state.pipeline_phase_name().to_string()
+}
+
 /// Delete all history rows. Replaces a renderer that had no real clear path.
 #[tauri::command]
-pub fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+pub fn clear_history(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let db = open_db(&state)?;
-    db.clear().map_err(|e| e.to_string())
+    db.clear().map_err(|e| e.to_string())?;
+    crate::events::emit_history_updated(&app);
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Config (disk-backed, unknown-key-preserving)
 // ---------------------------------------------------------------------------
 
-/// Load the full config as a JSON object so the frontend sees every key
-/// (including unknown/future ones preserved in `extra`). Replaces the renderer's
-/// `fs.readFileSync(CONFIG_PATH)`.
+/// Load the non-secret config as a JSON object. The legacy Gemini key field is
+/// stripped before the value crosses into the webview.
 #[tauri::command]
 pub fn load_config() -> Result<Value, String> {
     let cfg = load_cfg()?;
-    serde_json::to_value(&cfg).map_err(|e| e.to_string())
-}
-
-/// Merge a partial config object into the on-disk config and save, preserving
-/// unknown keys. Replaces the renderer's read-modify-`fs.writeFileSync` cycle.
-///
-/// The incoming object is shallow-merged onto the current file: keys present in
-/// `partial` overwrite, everything else is retained. Round-tripping through
-/// [`AppConfig`] keeps known fields typed and stashes anything else in `extra`,
-/// so no writer's keys are dropped.
-#[tauri::command]
-pub fn save_config(config: Value) -> Result<Value, String> {
-    let Value::Object(updates) = config else {
-        return Err("save_config expects a JSON object".to_string());
-    };
-
-    // Start from the current on-disk config as a raw object so we shallow-merge
-    // over *all* keys (known + unknown) uniformly.
-    let current = load_cfg()?;
-    let mut merged = match serde_json::to_value(&current).map_err(|e| e.to_string())? {
-        Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    for (k, v) in updates {
-        merged.insert(k, v);
-    }
-
-    let cfg: AppConfig =
-        serde_json::from_value(Value::Object(merged)).map_err(|e| e.to_string())?;
-    save_cfg(&cfg)?;
-    serde_json::to_value(&cfg).map_err(|e| e.to_string())
+    cfg_for_frontend(&cfg)
 }
 
 /// Enumerate input audio devices via cpal's default host.
@@ -157,12 +155,41 @@ pub fn set_audio_device(
     name: Option<String>,
     id: Option<String>,
 ) -> Result<Value, String> {
+    let (canonical_index, canonical_name) = match index {
+        Some(index) if index >= 0 => {
+            let devices = list_input_devices();
+            let supplied_name = name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty());
+            let selected = devices
+                .iter()
+                .find(|device| {
+                    device.index == index
+                        && match supplied_name {
+                            Some(name) => device.name == name,
+                            None => true,
+                        }
+                })
+                .or_else(|| {
+                    supplied_name.and_then(|name| devices.iter().find(|device| device.name == name))
+                })
+                .ok_or_else(|| "selected audio device is no longer available".to_string())?;
+            (Some(selected.index), selected.name.clone())
+        }
+        Some(_) => return Err("audio device index cannot be negative".to_string()),
+        None => (None, "System default".to_string()),
+    };
+    if id.as_deref().is_some_and(|id| id.len() > 512) {
+        return Err("audio device id is too long".to_string());
+    }
+    let _guard = lock_config_mutation()?;
     let mut cfg = load_cfg()?;
-    cfg.audio_device_index = index;
-    cfg.audio_device_name = name;
+    cfg.audio_device_index = canonical_index;
+    cfg.audio_device_name = Some(canonical_name);
     cfg.audio_device_id = id;
     save_cfg(&cfg)?;
-    serde_json::to_value(&cfg).map_err(|e| e.to_string())
+    cfg_for_frontend(&cfg)
 }
 
 /// Return the custom whisper-bias dictionary words. Replaces the renderer's
@@ -180,8 +207,15 @@ pub fn add_word(word: String) -> Result<Vec<String>, String> {
     if word.is_empty() {
         return Err("cannot add an empty word".to_string());
     }
+    if word.chars().count() > 100 {
+        return Err("dictionary entries are limited to 100 characters".to_string());
+    }
+    let _guard = lock_config_mutation()?;
     let mut cfg = load_cfg()?;
     if !cfg.custom_dictionary.iter().any(|w| w == &word) {
+        if cfg.custom_dictionary.len() >= 500 {
+            return Err("custom dictionary is limited to 500 entries".to_string());
+        }
         cfg.custom_dictionary.push(word);
         save_cfg(&cfg)?;
     }
@@ -192,6 +226,7 @@ pub fn add_word(word: String) -> Result<Vec<String>, String> {
 /// `dict-word-remove` handler. Returns the updated word list.
 #[tauri::command]
 pub fn remove_word(word: String) -> Result<Vec<String>, String> {
+    let _guard = lock_config_mutation()?;
     let mut cfg = load_cfg()?;
     let before = cfg.custom_dictionary.len();
     cfg.custom_dictionary.retain(|w| w != &word);
@@ -207,14 +242,14 @@ pub fn remove_word(word: String) -> Result<Vec<String>, String> {
 /// transcribe module in Phase 2.
 #[tauri::command]
 pub fn set_whisper_model(model: String) -> Result<Value, String> {
-    let model = model.trim().to_string();
-    if model.is_empty() {
-        return Err("whisper model name cannot be empty".to_string());
-    }
+    let _guard = lock_config_mutation()?;
+    let model = crate::models::normalize_model_name(&model)
+        .map_err(|e| e.to_string())?
+        .to_string();
     let mut cfg = load_cfg()?;
     cfg.whisper_model = model;
     save_cfg(&cfg)?;
-    serde_json::to_value(&cfg).map_err(|e| e.to_string())
+    cfg_for_frontend(&cfg)
 }
 
 /// Set the overlay orb anchor — either a preset string (`"bottom-center"`) or an
@@ -222,8 +257,82 @@ pub fn set_whisper_model(model: String) -> Result<Value, String> {
 /// `saveOrbCustom`. The value is stored raw so both shapes round-trip.
 #[tauri::command]
 pub fn set_orb_position(position: Value) -> Result<Value, String> {
+    let valid = match &position {
+        Value::String(preset) => [
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right",
+            "bottom-center",
+        ]
+        .contains(&preset.as_str()),
+        Value::Object(coords) if coords.len() == 2 => {
+            let x = coords.get("x").and_then(Value::as_i64);
+            let y = coords.get("y").and_then(Value::as_i64);
+            x.zip(y).is_some_and(|(x, y)| {
+                (-100_000..=100_000).contains(&x) && (-100_000..=100_000).contains(&y)
+            })
+        }
+        _ => false,
+    };
+    if !valid {
+        return Err("invalid orb position".to_string());
+    }
+    let _guard = lock_config_mutation()?;
     let mut cfg = load_cfg()?;
     cfg.orb_position = Some(position);
     save_cfg(&cfg)?;
-    serde_json::to_value(&cfg).map_err(|e| e.to_string())
+    cfg_for_frontend(&cfg)
+}
+
+/// Validate and persist the codebase root used by greppy/context search.
+#[tauri::command]
+pub fn set_codebase_path(path: Option<String>) -> Result<Value, String> {
+    let _guard = lock_config_mutation()?;
+    let path = path
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty());
+    let canonical = match path {
+        Some(path) => {
+            let canonical = std::fs::canonicalize(&path)
+                .map_err(|e| format!("codebase path is not accessible: {e}"))?;
+            if !canonical.is_dir() {
+                return Err("codebase path must be a directory".to_string());
+            }
+            Some(canonical.to_string_lossy().into_owned())
+        }
+        None => None,
+    };
+    let mut cfg = load_cfg()?;
+    cfg.codebase_path = canonical;
+    save_cfg(&cfg)?;
+    cfg_for_frontend(&cfg)
+}
+
+/// Return only the source of the effective Gemini key, never the secret itself.
+#[tauri::command]
+pub fn get_gemini_key_status() -> Result<Option<String>, String> {
+    Ok(load_cfg()?.gemini_key_source().map(str::to_string))
+}
+
+/// Store or clear the private Gemini key used by cleanup/plan modes.
+#[tauri::command]
+pub fn set_gemini_api_key(key: Option<String>) -> Result<Option<String>, String> {
+    let key = key
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    if let Some(key) = key.as_deref() {
+        if key.len() > 512 || key.chars().any(char::is_whitespace) {
+            return Err(
+                "Gemini API key must be at most 512 characters with no whitespace".to_string(),
+            );
+        }
+    }
+    let _guard = lock_config_mutation()?;
+    AppConfig::set_managed_gemini_api_key(key.as_deref()).map_err(|e| e.to_string())?;
+    let mut cfg = load_cfg()?;
+    if cfg.gemini_api_key.take().is_some() {
+        save_cfg(&cfg)?;
+    }
+    Ok(load_cfg()?.gemini_key_source().map(str::to_string))
 }

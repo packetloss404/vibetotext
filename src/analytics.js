@@ -1,4 +1,4 @@
-// Analytics Charts for VibeToText
+// Analytics Charts for PacketVoice
 // Uses D3.js v7 for visualizations
 
 console.log('[Analytics] analytics.js loaded, D3 available:', typeof d3 !== 'undefined');
@@ -110,12 +110,12 @@ function getTooltip() {
   return tooltip;
 }
 
-function showTooltip(event, html) {
+function showTooltip(event, text) {
   const tip = getTooltip();
   const vw = window.innerWidth;
   const flipX = event.clientX > vw - 220;
   const left = flipX ? event.pageX - 220 : event.pageX + 10;
-  tip.html(html)
+  tip.text(text)
     .style('left', left + 'px')
     .style('top', (event.pageY - 10) + 'px')
     .style('opacity', 1);
@@ -123,6 +123,21 @@ function showTooltip(event, html) {
 
 function hideTooltip() {
   getTooltip().style('opacity', 0);
+}
+
+// Calendar analytics are intentionally grouped in the user's local timezone.
+// Avoid toISOString(), which converts local midnight/hour values back to UTC
+// and can move entries into the previous or next day.
+function localDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function dateKeyDayNumber(key) {
+  const [year, month, day] = key.split('-').map(Number);
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000);
 }
 
 // Process entries for charts
@@ -172,7 +187,7 @@ function processData(entries) {
     const date = new Date(entry.timestamp);
     const dayOfWeek = date.getDay();
     const hour = date.getHours();
-    const dateKey = date.toISOString().split('T')[0];
+    const dateKey = localDateKey(date);
 
     // Track days used for streaks
     daysUsed.add(dateKey);
@@ -310,17 +325,18 @@ function processData(entries) {
   let currentStreak = 0;
   let longestStreak = 0;
   let tempStreak = 0;
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const nowLocal = new Date();
+  const yesterdayLocal = new Date(nowLocal);
+  yesterdayLocal.setDate(yesterdayLocal.getDate() - 1);
+  const today = localDateKey(nowLocal);
+  const yesterday = localDateKey(yesterdayLocal);
 
   // Calculate longest streak
   for (let i = 0; i < sortedDays.length; i++) {
     if (i === 0) {
       tempStreak = 1;
     } else {
-      const prevDate = new Date(sortedDays[i - 1]);
-      const currDate = new Date(sortedDays[i]);
-      const diffDays = (currDate - prevDate) / 86400000;
+      const diffDays = dateKeyDayNumber(sortedDays[i]) - dateKeyDayNumber(sortedDays[i - 1]);
       if (diffDays === 1) {
         tempStreak++;
       } else {
@@ -334,9 +350,10 @@ function processData(entries) {
   if (daysUsed.has(today) || daysUsed.has(yesterday)) {
     currentStreak = 1;
     const startDay = daysUsed.has(today) ? today : yesterday;
-    let checkDate = new Date(startDay);
+    const [startYear, startMonth, startDate] = startDay.split('-').map(Number);
+    let checkDate = new Date(startYear, startMonth - 1, startDate);
     checkDate.setDate(checkDate.getDate() - 1);
-    while (daysUsed.has(checkDate.toISOString().split('T')[0])) {
+    while (daysUsed.has(localDateKey(checkDate))) {
       currentStreak++;
       checkDate.setDate(checkDate.getDate() - 1);
     }
@@ -393,7 +410,7 @@ function processData(entries) {
   const cumulativeVocab = new Set();
   const vocabGrowthByDay = {};
   sortedEntries.forEach(entry => {
-    const dateKey = new Date(entry.timestamp).toISOString().split('T')[0];
+    const dateKey = localDateKey(new Date(entry.timestamp));
     const text = entry.text || '';
     const words = text.toLowerCase().replace(/[.,!?;:'"()\[\]{}]/g, '').split(/\s+/).filter(w => w.length > 2);
     words.forEach(w => cumulativeVocab.add(w));
@@ -649,7 +666,7 @@ function renderYearlyHeatmap(containerId, dailyData) {
 
   // Draw cells
   days.forEach((date, i) => {
-    const dateKey = date.toISOString().split('T')[0];
+    const dateKey = localDateKey(date);
     const dayData = dailyData[dateKey];
     const value = dayData ? dayData.entries : 0;
 

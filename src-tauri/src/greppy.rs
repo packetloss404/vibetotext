@@ -19,12 +19,18 @@
 //! no usable results. Callers treat `None` as "no code context available" and
 //! proceed without injection.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use wait_timeout::ChildExt;
 
 /// Max number of lines read from each matched file when building the greppy-mode
 /// file dump (matches `format_files_for_context`'s `max_lines_per_file=200`).
 const MAX_LINES_PER_FILE: usize = 200;
+const GREPPY_TIMEOUT: Duration = Duration::from_secs(30);
+const GREPPY_MAX_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 
 /// One parsed line of `greppy ... --json` output.
 ///
@@ -58,7 +64,7 @@ fn default_start_line() -> u32 {
 /// `io::ErrorKind::NotFound` spawn error, which we map to `None`. A non-zero
 /// exit (Python's `result.returncode != 0`) is likewise `None`.
 fn run_greppy(query: &str, codebase: &Path, limit: usize) -> Option<String> {
-    let output = Command::new("greppy")
+    let mut child = Command::new("greppy")
         .arg("search")
         .arg(query)
         .arg("-n")
@@ -66,7 +72,9 @@ fn run_greppy(query: &str, codebase: &Path, limit: usize) -> Option<String> {
         .arg("-p")
         .arg(codebase)
         .arg("--json")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| {
             // NotFound == greppy not installed: expected, log quietly. Other
             // spawn errors are unusual enough to warrant a warning.
@@ -78,12 +86,52 @@ fn run_greppy(query: &str, codebase: &Path, limit: usize) -> Option<String> {
         })
         .ok()?;
 
-    if !output.status.success() {
-        tracing::debug!(status = ?output.status.code(), "greppy exited non-zero");
+    // Drain stdout concurrently so a chatty subprocess cannot fill its pipe and
+    // deadlock while we wait for the bounded process lifetime.
+    let stdout_pipe = child.stdout.take()?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout_pipe
+            .take(GREPPY_MAX_OUTPUT_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > GREPPY_MAX_OUTPUT_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "greppy output exceeded 16 MiB limit",
+            ));
+        }
+        Ok(bytes)
+    });
+
+    let status = match child.wait_timeout(GREPPY_TIMEOUT) {
+        Ok(Some(status)) => status,
+        Ok(None) => {
+            tracing::warn!(
+                timeout_s = GREPPY_TIMEOUT.as_secs(),
+                "greppy timed out; terminating process"
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            return None;
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "failed while waiting for greppy");
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            return None;
+        }
+    };
+
+    if !status.success() {
+        tracing::debug!(status = ?status.code(), "greppy exited non-zero");
+        let _ = stdout_reader.join();
         return None;
     }
 
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    let stdout = stdout_reader.join().ok()?.ok()?;
+    Some(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// Parse greppy's newline-delimited JSON stdout into hits.
@@ -316,7 +364,8 @@ mod tests {
 
     #[test]
     fn parse_single_json_line() {
-        let stdout = r#"{"file_path":"src/main.rs","start_line":10,"end_line":25,"content":"fn main() {}"}"#;
+        let stdout =
+            r#"{"file_path":"src/main.rs","start_line":10,"end_line":25,"content":"fn main() {}"}"#;
         let hits = parse_hits(stdout);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].file_path, "src/main.rs");

@@ -1,20 +1,20 @@
 [package]
-name = "vibetotext"
+name = "packetvoice"
 version = "0.1.0"
-description = "VibeToText - cross-platform push-to-talk transcription"
-authors = ["VibeToText"]
+description = "PacketVoice - cross-platform push-to-talk transcription"
+authors = ["Ian Walmsley", "dyoburon"]
 edition = "2021"
-rust-version = "1.77"
-default-run = "vibetotext"
+rust-version = "1.94"
+default-run = "packetvoice"
 
 # The library that main.rs drives. Tauri v2 convention: app logic lives in a
 # lib crate so it can also be reused by mobile/test targets.
 [lib]
-name = "vibetotext_lib"
+name = "packetvoice_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "vibetotext"
+name = "packetvoice"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -31,6 +31,7 @@ tauri-plugin-window-state = "2.4"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+atomic-write-file = "0.3"
 
 # Bundled SQLite so we don't depend on a system libsqlite3 across OSes.
 # Pinned to 0.39 (libsqlite3-sys 0.37): rusqlite 0.40 pulls libsqlite3-sys
@@ -56,6 +57,7 @@ whisper-rs = "0.16"
 # Model download-on-first-run (models.rs). Blocking client; rustls-tls avoids a
 # system OpenSSL dependency on Linux. 0.13 matches the copy tauri already pulls.
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+sha1 = "0.10"
 
 # Phase 3 hotkeys + paste.
 # Global low-level key listener for the push-to-talk chord state machine
@@ -72,12 +74,15 @@ arboard = "3.6"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+wait-timeout = "0.2"
 
 # Phase 5 feature-gated localhost HTTP transcription endpoint (local_api.rs).
 # Optional: only compiled in when the `local-api` cargo feature is enabled, so a
 # default build pulls in no extra HTTP server. tiny_http is a tiny, blocking,
 # dependency-light server — bound to 127.0.0.1 loopback only for security.
 tiny_http = { version = "0.12", optional = true }
+base64 = { version = "0.22", optional = true }
 
 # Windows-only: resolve full WASAPI capture-endpoint names ("Headset (PLT Focus)")
 # for the mic picker, since cpal reports generic short names ("Headset"). The
@@ -107,7 +112,7 @@ cuda = ["whisper-rs/cuda"]
 vulkan = ["whisper-rs/vulkan"]
 # Feature-gated localhost HTTP transcription endpoint (Phase 5). Off by default;
 # pulls in the optional `tiny_http` dep only when explicitly enabled.
-local-api = ["dep:tiny_http"]
+local-api = ["dep:tiny_http", "dep:base64"]
 
 [profile.release]
 # whisper.cpp + rusqlite bundled builds benefit from LTO; keep panic=abort

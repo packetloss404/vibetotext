@@ -86,3 +86,14 @@ pub fn emit_pipeline_status<R: Runtime>(app: &AppHandle<R>, phase: &str, mode: &
         tracing::warn!(error = %e, "failed to emit pipeline-status event");
     }
 }
+
+#[derive(Clone, Serialize)]
+struct PermissionNeededPayload<'a> {
+    kind: &'a str,
+}
+
+pub fn emit_permission_needed<R: Runtime>(app: &AppHandle<R>, kind: &str) {
+    if let Err(e) = app.emit(PERMISSION_NEEDED, PermissionNeededPayload { kind }) {
+        tracing::warn!(error = %e, "failed to emit permission-needed event");
+    }
+}

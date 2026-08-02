@@ -131,7 +131,10 @@ mod macos {
 
             // Silence the unused-import-style warning for the helper we keep
             // available for callers that want to build CF strings themselves.
-            let _ = (CFStringCreateWithCString as usize, K_CF_STRING_ENCODING_UTF8);
+            let _ = (
+                CFStringCreateWithCString as usize,
+                K_CF_STRING_ENCODING_UTF8,
+            );
 
             trusted
         }

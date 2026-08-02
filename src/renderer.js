@@ -1,9 +1,9 @@
-// VibeToText dashboard renderer (Tauri port of history-app/renderer.js).
+// PacketVoice dashboard renderer (Tauri port of history-app/renderer.js).
 //
 // PHASE 1 CONTRACT: every former Node/Electron coupling point goes through the
 // global `vtt` shim from api.js (a thin wrapper over Tauri invoke/listen).
 //   - better-sqlite3 loadHistory()      -> await vtt.getEntries()
-//   - fs config read/write              -> vtt.loadConfig() / vtt.saveConfig()
+//   - fs config read                    -> vtt.loadConfig()
 //   - navigator.mediaDevices mic list   -> await vtt.listAudioDevices()
 //   - config custom_dictionary CRUD     -> vtt.getDictionary/addWord/removeWord
 //   - chokidar 'history-updated' (ipc)  -> vtt.onHistoryUpdated(() => render())
@@ -42,6 +42,51 @@ let currentMode = 'all';
 // (updateHeaderStats, getCommonWords) read from. It is refreshed by
 // loadHistory() and on every 'history-updated' event.
 let cachedEntries = [];
+let pipelineBannerTimer = null;
+
+const PIPELINE_MESSAGES = {
+  preparing_model: 'Preparing the local Whisper model… first launch may take a few minutes.',
+  ready: 'PacketVoice is ready.',
+  model_unavailable: 'The Whisper model could not be prepared. Check your network and the PacketVoice log; the next recording will retry.',
+  not_ready: 'The local Whisper model is still preparing. Try again when PacketVoice is ready.',
+  busy: 'PacketVoice is still processing the previous recording.',
+  transcribing: 'Transcribing locally…',
+  searching_context: 'Searching the configured codebase for context…',
+  cleaning_up: 'Cleaning up the transcription with Gemini…',
+  generating_plan: 'Generating an implementation plan with Gemini…',
+  searching_files: 'Finding relevant files with Greppy…',
+  saving: 'Saving transcription history…',
+  pasting: 'Pasting at the cursor…',
+  done: 'Transcription pasted.',
+  failed: 'Transcription failed. Check the PacketVoice log for details.',
+  permission_needed: 'PacketVoice needs an operating-system permission before hotkeys can work.',
+};
+
+function showPipelineStatus(phase, mode) {
+  const banner = document.getElementById('pipeline-banner');
+  const message = document.getElementById('pipeline-message');
+  if (!banner || !message) return;
+
+  if (pipelineBannerTimer) {
+    clearTimeout(pipelineBannerTimer);
+    pipelineBannerTimer = null;
+  }
+
+  const text = PIPELINE_MESSAGES[phase] || phase.replaceAll('_', ' ');
+  const modeSuffix = mode && ['transcribing', 'cleaning_up', 'generating_plan'].includes(phase)
+    ? ` (${mode})`
+    : '';
+  message.textContent = text + modeSuffix;
+  banner.classList.toggle('error', ['failed', 'not_ready', 'busy', 'permission_needed', 'model_unavailable'].includes(phase));
+  banner.classList.toggle('success', ['ready', 'done'].includes(phase));
+  banner.hidden = false;
+
+  if (['ready', 'done'].includes(phase)) {
+    pipelineBannerTimer = setTimeout(() => {
+      banner.hidden = true;
+    }, 2500);
+  }
+}
 
 // Load history entries via the Rust backend (was: better-sqlite3 + JSON fallback).
 // Returns the entries array and updates the cache.
@@ -109,7 +154,7 @@ function updateHeaderStats(mode) {
   const allEntries = cachedEntries;
 
   // Settings tabs (analytics, microphone, dictionary) show "all" stats
-  const settingsTabs = ['analytics', 'microphone', 'dictionary'];
+  const settingsTabs = ['analytics', 'microphone', 'dictionary', 'settings'];
   const effectiveMode = settingsTabs.includes(mode) ? 'all' : mode;
   const entries = effectiveMode === 'all'
     ? allEntries
@@ -127,7 +172,7 @@ function updateHeaderStats(mode) {
   const entriesWithDuration = entries.filter(e => e.duration_seconds);
   const totalDuration = entriesWithDuration.reduce((sum, e) => sum + e.duration_seconds, 0);
   const wordsWithDuration = entriesWithDuration.reduce((sum, e) => sum + (e.word_count || e.text.split(/\s+/).length), 0);
-  const typingWpm = 100;
+  const typingWpm = 40;
   const timeToTypeMinutes = wordsWithDuration / typingWpm;
   const timeDictatingMinutes = totalDuration / 60;
   const timeSavedMinutes = Math.max(0, timeToTypeMinutes - timeDictatingMinutes);
@@ -188,7 +233,7 @@ async function render(forceRender = false) {
   const commonWords = getCommonWords(entries);
   const commonWordsContainer = document.getElementById('common-words');
   commonWordsContainer.innerHTML = commonWords
-    .map(([word, count]) => `<span class="word-chip">${word}<span class="count">${count}</span></span>`)
+    .map(([word, count]) => `<span class="word-chip">${escapeHtml(word)}<span class="count">${count}</span></span>`)
     .join('');
 
   // Render entries
@@ -205,10 +250,10 @@ async function render(forceRender = false) {
     const statsStr = [durationStr, wpmStr, `${wordCount} words`].filter(Boolean).join(' · ');
 
     return `
-      <div class="entry" data-timestamp="${entry.timestamp}">
+      <div class="entry" data-timestamp="${escapeHtml(entry.timestamp)}">
         <div class="entry-header">
           <span class="entry-time">${timeStr}</span>
-          <span class="entry-mode ${mode}">${mode}</span>
+          <span class="entry-mode ${escapeHtml(mode)}">${escapeHtml(mode)}</span>
         </div>
         <div class="entry-text">${escapeHtml(entry.text)}</div>
         <div class="entry-stats">${statsStr}</div>
@@ -238,14 +283,6 @@ async function loadConfig() {
   } catch (err) {
     console.error('Error loading config:', err);
     return {};
-  }
-}
-
-async function saveConfig(config) {
-  try {
-    await vtt.saveConfig(config);
-  } catch (err) {
-    console.error('Error saving config:', err);
   }
 }
 
@@ -283,9 +320,13 @@ async function loadAudioDevices() {
       const deviceIndex = device.index != null ? device.index : index;
 
       const option = document.createElement('option');
-      option.value = deviceId != null ? deviceId : '';
+      // Native cpal devices do not expose a stable web-style device id. Use the
+      // enumeration index as the selectable value so index 0 is still truthy
+      // ("0") and the change handler can persist the selection.
+      option.value = deviceId != null ? String(deviceId) : String(deviceIndex);
       option.textContent = deviceName || `Microphone ${index + 1}`;
       option.dataset.index = deviceIndex;
+      option.dataset.deviceId = deviceId != null ? String(deviceId) : '';
 
       // Try to match by device index first, then ID, then name.
       if (savedDeviceIndex != null && deviceIndex === savedDeviceIndex) {
@@ -316,14 +357,16 @@ async function handleMicChange(event) {
   const micStatus = document.getElementById('mic-status');
 
   if (selectedOption && selectedOption.value) {
-    const config = await loadConfig();
-    config.audio_device_id = selectedOption.value;
-    config.audio_device_name = selectedOption.textContent;
-    config.audio_device_index = parseInt(selectedOption.dataset.index, 10);
-    await saveConfig(config);
-
-    // Single process now: settings hot-apply, no restart required.
-    micStatus.textContent = `Saved: ${selectedOption.textContent}`;
+    const deviceIndex = parseInt(selectedOption.dataset.index, 10);
+    const deviceId = selectedOption.dataset.deviceId || null;
+    try {
+      await vtt.setAudioDevice(deviceIndex, selectedOption.textContent, deviceId);
+      // Single process now: settings hot-apply, no restart required.
+      micStatus.textContent = `Saved: ${selectedOption.textContent}`;
+    } catch (err) {
+      micStatus.textContent = `Could not save microphone: ${err}`;
+      await loadAudioDevices();
+    }
   }
 }
 
@@ -362,6 +405,8 @@ async function renderDictionaryWords() {
         await vtt.removeWord(wordToRemove);
       } catch (err) {
         console.error('Error removing word:', err);
+        showDictStatus(String(err));
+        return;
       }
       await renderDictionaryWords();
       showDictStatus(`Removed "${wordToRemove}"`);
@@ -385,6 +430,8 @@ async function addDictionaryWord() {
     await vtt.addWord(word);
   } catch (err) {
     console.error('Error adding word:', err);
+    showDictStatus(String(err));
+    return;
   }
   await renderDictionaryWords();
   input.value = '';
@@ -403,7 +450,7 @@ function showDictStatus(message) {
 async function renderSettings() {
   const config = await loadConfig();
   const orbPos = config.orb_position || 'bottom-center';
-  const model = config.whisper_model || 'small';
+  const model = config.whisper_model === 'large' ? 'large-v3' : (config.whisper_model || 'small');
 
   // Set active preset
   document.querySelectorAll('.orb-preset').forEach(btn => {
@@ -422,12 +469,17 @@ async function renderSettings() {
 
   // Set model dropdown
   document.getElementById('model-select').value = model;
+  document.getElementById('codebase-path').value = config.codebase_path || '';
+  await refreshGeminiStatus();
 }
 
 async function saveOrbPreset(preset) {
-  const config = await loadConfig();
-  config.orb_position = preset;
-  await saveConfig(config);
+  try {
+    await vtt.setOrbPosition(preset);
+  } catch (err) {
+    showSettingsStatus('orb-status', String(err));
+    return;
+  }
 
   // Update UI
   document.querySelectorAll('.orb-preset').forEach(btn => {
@@ -448,20 +500,85 @@ async function saveOrbCustom() {
     return;
   }
 
-  const config = await loadConfig();
-  config.orb_position = { x, y };
-  await saveConfig(config);
+  try {
+    await vtt.setOrbPosition({ x, y });
+  } catch (err) {
+    showSettingsStatus('orb-status', String(err));
+    return;
+  }
 
   document.querySelectorAll('.orb-preset').forEach(btn => btn.classList.remove('active'));
   showSettingsStatus('orb-status', `Orb position set to (${x}, ${y})`);
 }
 
 async function saveWhisperModel(model) {
-  const config = await loadConfig();
-  config.whisper_model = model;
-  await saveConfig(config);
+  try {
+    await vtt.setWhisperModel(model);
+  } catch (err) {
+    showSettingsStatus('model-status', String(err));
+    return;
+  }
   // Model hot-reloads in the single process — no restart needed.
   showSettingsStatus('model-status', `Model set to ${model}`);
+}
+
+async function saveCodebasePath() {
+  const input = document.getElementById('codebase-path');
+  try {
+    const config = await vtt.setCodebasePath(input.value.trim() || null);
+    input.value = config.codebase_path || '';
+    showSettingsStatus('codebase-status', config.codebase_path ? 'Codebase path saved' : 'Codebase context disabled');
+  } catch (err) {
+    showSettingsStatus('codebase-status', String(err));
+  }
+}
+
+async function refreshGeminiStatus() {
+  const status = document.getElementById('gemini-status');
+  try {
+    const source = await vtt.getGeminiKeyStatus();
+    status.textContent = source ? `Configured via ${source}` : 'Not configured — Cleanup and Plan fall back to raw transcription';
+  } catch (err) {
+    status.textContent = `Could not read status: ${err}`;
+  }
+}
+
+async function saveGeminiKey() {
+  const input = document.getElementById('gemini-key');
+  if (!input.value.trim()) {
+    showSettingsStatus('gemini-status', 'Paste a key before saving');
+    return;
+  }
+  try {
+    await vtt.setGeminiApiKey(input.value.trim());
+    input.value = '';
+    await refreshGeminiStatus();
+  } catch (err) {
+    showSettingsStatus('gemini-status', String(err));
+  }
+}
+
+async function clearGeminiKey() {
+  try {
+    await vtt.setGeminiApiKey(null);
+    document.getElementById('gemini-key').value = '';
+    await refreshGeminiStatus();
+  } catch (err) {
+    showSettingsStatus('gemini-status', String(err));
+  }
+}
+
+async function clearHistory() {
+  if (!window.confirm('Delete all transcription history? This cannot be undone.')) return;
+  try {
+    await vtt.clearHistory();
+    cachedEntries = [];
+    lastDataHash = '';
+    updateHeaderStats('all');
+    showSettingsStatus('history-status', 'Transcription history cleared');
+  } catch (err) {
+    showSettingsStatus('history-status', String(err));
+  }
 }
 
 function showSettingsStatus(elementId, message) {
@@ -582,9 +699,18 @@ document.getElementById('orb-custom-save').addEventListener('click', saveOrbCust
 document.getElementById('model-select').addEventListener('change', (e) => {
   saveWhisperModel(e.target.value);
 });
+document.getElementById('codebase-save').addEventListener('click', saveCodebasePath);
+document.getElementById('gemini-save').addEventListener('click', saveGeminiKey);
+document.getElementById('gemini-clear').addEventListener('click', clearGeminiKey);
+document.getElementById('history-clear').addEventListener('click', clearHistory);
 
 // Initial render
 render();
+if (typeof vtt.getPipelineStatus === 'function') {
+  vtt.getPipelineStatus()
+    .then(phase => showPipelineStatus(phase || 'preparing_model'))
+    .catch(err => console.error('Error loading pipeline status:', err));
+}
 
 // Refresh when the backend writes a new entry. This replaces both the chokidar
 // 'history-updated' ipcRenderer listener AND the 5-second setInterval poll from
@@ -604,4 +730,26 @@ if (typeof vtt.onHistoryUpdated === 'function') {
       render();
     }
   });
+}
+
+if (typeof vtt.onPipelineStatus === 'function') {
+  vtt.onPipelineStatus(payload => {
+    if (payload && payload.phase) {
+      showPipelineStatus(payload.phase, payload.mode);
+    }
+  });
+}
+
+if (typeof vtt.onRecordingState === 'function') {
+  vtt.onRecordingState(payload => {
+    if (payload && payload.recording) {
+      showPipelineStatus('recording', payload.mode);
+      const message = document.getElementById('pipeline-message');
+      if (message) message.textContent = `Recording (${payload.mode || 'transcribe'})… release the hotkey to finish.`;
+    }
+  });
+}
+
+if (typeof vtt.onPermissionNeeded === 'function') {
+  vtt.onPermissionNeeded(() => showPipelineStatus('permission_needed'));
 }

@@ -1,4 +1,4 @@
-# VibeToText Analytics Feature - Implementation Plan
+# PacketVoice Analytics Feature - Implementation Plan
 
 ## Overview
 

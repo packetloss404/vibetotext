@@ -9,7 +9,13 @@
 //! listener, recorder, whisper model, etc.) by adding fields here.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+
+pub const PIPELINE_PREPARING: u8 = 0;
+pub const PIPELINE_IDLE: u8 = 1;
+pub const PIPELINE_RECORDING: u8 = 2;
+pub const PIPELINE_PROCESSING: u8 = 3;
 
 /// Errors surfaced while bringing up application state.
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +46,9 @@ pub struct AppState {
     /// have a single, lock-once place to add the Pipeline handle and friends
     /// without changing the `manage()` call site.
     pub inner: Arc<Mutex<Inner>>,
+
+    /// Lightweight runtime status shared with the hotkey admission gate and UI.
+    pub pipeline_phase: Arc<AtomicU8>,
 }
 
 /// Mutable, lock-guarded portion of [`AppState`].
@@ -66,11 +75,23 @@ impl AppState {
             source,
         })?;
 
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700)).map_err(
+                |source| StateError::CreateDataDir {
+                    path: data_dir.clone(),
+                    source,
+                },
+            )?;
+        }
+
         tracing::info!(data_dir = %data_dir.display(), "app data directory ready");
 
         Ok(Self {
             data_dir: Arc::new(data_dir),
             inner: Arc::new(Mutex::new(Inner::default())),
+            pipeline_phase: Arc::new(AtomicU8::new(PIPELINE_PREPARING)),
         })
     }
 
@@ -98,5 +119,15 @@ impl AppState {
     /// `~/.vibetotext/models` — ggml whisper models live here.
     pub fn models_dir(&self) -> PathBuf {
         self.data_dir.join("models")
+    }
+
+    pub fn pipeline_phase_name(&self) -> &'static str {
+        match self.pipeline_phase.load(Ordering::Acquire) {
+            PIPELINE_PREPARING => "preparing_model",
+            PIPELINE_IDLE => "ready",
+            PIPELINE_RECORDING => "recording",
+            PIPELINE_PROCESSING => "processing",
+            _ => "unknown",
+        }
     }
 }

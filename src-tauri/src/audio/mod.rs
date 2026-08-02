@@ -11,6 +11,6 @@
 //! are owned by other builders. The module declarations are present so the crate links
 //! once all three land (the Verify agent runs the authoritative build).
 
+pub mod devices;
 pub mod recorder;
 pub mod waveform;
-pub mod devices;

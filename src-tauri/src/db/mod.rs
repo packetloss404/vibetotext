@@ -1,4 +1,4 @@
-//! SQLite history layer for VibeToText.
+//! SQLite history layer for PacketVoice.
 //!
 //! Port of `src/vibetotext/history.py`. Owns the canonical `entries` table over
 //! `~/.vibetotext/history.db`, with a `PRAGMA user_version`-gated migration that
@@ -88,6 +88,11 @@ impl Db {
         }
 
         let conn = Self::configure_connection(&path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        }
         let db = Self {
             conn: Mutex::new(conn),
             path,
@@ -354,8 +359,13 @@ mod tests {
         cleanup(&path);
         {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
-            db.add_entry("hello good world", "transcribe", "2026-06-02T12:00:00", None)
-                .unwrap();
+            db.add_entry(
+                "hello good world",
+                "transcribe",
+                "2026-06-02T12:00:00",
+                None,
+            )
+            .unwrap();
         }
         // Second open should succeed and preserve data.
         {
@@ -417,12 +427,22 @@ mod tests {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
             // 100 words in 60s -> 100 wpm.
             let text100 = "word ".repeat(100);
-            db.add_entry(text100.trim(), "transcribe", "2026-06-01T10:00:00", Some(60.0))
-                .unwrap();
+            db.add_entry(
+                text100.trim(),
+                "transcribe",
+                "2026-06-01T10:00:00",
+                Some(60.0),
+            )
+            .unwrap();
             // 40 words in 60s -> 40 wpm.
             let text40 = "alpha ".repeat(40);
-            db.add_entry(text40.trim(), "transcribe", "2026-06-02T10:00:00", Some(60.0))
-                .unwrap();
+            db.add_entry(
+                text40.trim(),
+                "transcribe",
+                "2026-06-02T10:00:00",
+                Some(60.0),
+            )
+            .unwrap();
 
             let s = db.get_statistics().unwrap();
             assert_eq!(s.total_sessions, 2);

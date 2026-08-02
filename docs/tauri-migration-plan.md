@@ -26,9 +26,9 @@ scripts, `pyproject.toml`.
 | GPU | **CPU-only MVP**; `metal`/`cuda`/`vulkan` cargo features scaffolded but off — opt-in builds post-MVP. |
 | External socket API | **Revive** as a feature-gated **localhost HTTP** endpoint (`local_api.rs`) reusing the in-process whisper model. |
 
-## 3. Research findings (2026-06)
+## 3. Research findings (updated 2026-08)
 
-- **Gemini model id:** use **`gemini-3.5-flash`** (GA/Stable, best price-performance for coding/agentic
+- **Gemini model id:** use **`gemini-3.6-flash`** (GA/Stable, current Flash model for coding/agentic
   via `generateContent`). `gemini-2.0-flash` (old Windows app) is **shut down** as of 2026-06-01.
   `gemini-3-flash-preview` (Python/macOS) was a preview id. Key resolution order:
   `GEMINI_API_KEY` → `GOOGLE_API_KEY` env → `~/.vibetotext/.env` → `config.json` `gemini_api_key`.
@@ -76,7 +76,7 @@ app/
 │     ├─ audio/{recorder,waveform,devices}.rs  # cpal + rustfft (waveform math matches recorder.py)
 │     ├─ transcribe/{mod,prompt,artifacts}.rs  # whisper-rs + TECH_PROMPT + dictionary + filters
 │     ├─ sentiment.rs            # VADER port (vendored lexicon)
-│     ├─ llm/{mod,prompts}.rs    # reqwest Gemini client (gemini-3.5-flash)
+│     ├─ llm/{mod,prompts}.rs    # reqwest Gemini client (gemini-3.6-flash)
 │     ├─ greppy.rs               # std::process greppy CLI wrapper
 │     ├─ paste.rs                # enigo + clipboard fallback
 │     ├─ hotkey/{mod,permissions}.rs   # rdev behind a trait; macOS AXIsProcessTrusted
@@ -147,7 +147,7 @@ Each phase is run by the **same reusable workflow** (`.claude` workflow, invoked
 | **1** | UI port: `analytics.js`/d3/HTML/CSS verbatim; `renderer.js`→`api.js`+invoke/listen. **Demo: dashboard live on real DB.** | api.js shim; renderer rewrite; commands (get_entries/stats/config); tray+window-state |
 | **2** | Audio + transcription: cpal + rustfft waveform (match `recorder.py`), whisper-rs + TECH_PROMPT + dict + filters, model download. | recorder; waveform; transcribe+prompt+artifacts; models+devices |
 | **3** | Hotkeys + paste + overlay: rdev chord state machine (port C#/Swift), enigo paste + fallback, transparent click-through overlay, macOS perms. | hotkey(rdev)+trait; permissions; paste(enigo); overlay |
-| **4** | Pipeline + all 4 modes (transcribe/cleanup/plan/greppy — **closes Windows gap**); VADER on write; Gemini `gemini-3.5-flash`. | pipeline orchestrator; llm(gemini); greppy+context; mode glue/events |
+| **4** | Pipeline + all 4 modes (transcribe/cleanup/plan/greppy — **closes Windows gap**); VADER on write; Gemini `gemini-3.6-flash`. | pipeline orchestrator; llm(gemini); greppy+context; mode glue/events |
 | **5** | Build/sign/CI + `local_api.rs`: bundle targets, per-OS signing/notarization, new `release.yml`, feature-gated localhost endpoint. | tauri.conf/bundling; CI matrix; signing/notarization; local_api |
 | **6** | Decommission: delete old trees + packaging + scripts + `pyproject.toml`, relocate `app/`→root, rewrite README. | (single sweep) |
 

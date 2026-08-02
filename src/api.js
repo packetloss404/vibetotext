@@ -1,5 +1,5 @@
 // api.js — thin shim exposing a global `vtt` object that wraps the Tauri
-// command/event surface. Phase 1 of the VibeToText Tauri migration.
+// command/event surface. Phase 1 of the PacketVoice Tauri migration.
 //
 // `withGlobalTauri` is enabled in tauri.conf.json, so the Tauri JS API is
 // available at `window.__TAURI__`:
@@ -47,17 +47,16 @@
     return invoke('get_statistics', { mode: mode });
   }
 
+  function getPipelineStatus() {
+    return invoke('get_pipeline_status');
+  }
+
   function clearHistory() {
     return invoke('clear_history');
   }
 
   function loadConfig() {
     return invoke('load_config');
-  }
-
-  function saveConfig(cfg) {
-    // save_config takes a partial config and preserves unknown keys server-side.
-    return invoke('save_config', { config: cfg });
   }
 
   function getDictionary() {
@@ -72,12 +71,24 @@
     return invoke('remove_word', { word: word });
   }
 
-  function setAudioDevice(index, name) {
-    return invoke('set_audio_device', { index: index, name: name });
+  function setAudioDevice(index, name, id) {
+    return invoke('set_audio_device', { index: index, name: name, id: id });
   }
 
   function setWhisperModel(model) {
     return invoke('set_whisper_model', { model: model });
+  }
+
+  function setCodebasePath(path) {
+    return invoke('set_codebase_path', { path: path });
+  }
+
+  function getGeminiKeyStatus() {
+    return invoke('get_gemini_key_status');
+  }
+
+  function setGeminiApiKey(key) {
+    return invoke('set_gemini_api_key', { key: key });
   }
 
   function setOrbPosition(position) {
@@ -102,21 +113,48 @@
     });
   }
 
+  function subscribe(eventName, cb) {
+    if (!listen) {
+      return Promise.resolve(function () {});
+    }
+    return listen(eventName, function (event) {
+      cb(event && event.payload);
+    });
+  }
+
+  function onPipelineStatus(cb) {
+    return subscribe('pipeline-status', cb);
+  }
+
+  function onRecordingState(cb) {
+    return subscribe('recording-state', cb);
+  }
+
+  function onPermissionNeeded(cb) {
+    return subscribe('permission-needed', cb);
+  }
+
   global.vtt = {
     available: hasTauri,
     getEntries: getEntries,
     getStatistics: getStatistics,
+    getPipelineStatus: getPipelineStatus,
     clearHistory: clearHistory,
     loadConfig: loadConfig,
-    saveConfig: saveConfig,
     getDictionary: getDictionary,
     addWord: addWord,
     removeWord: removeWord,
     setAudioDevice: setAudioDevice,
     setWhisperModel: setWhisperModel,
+    setCodebasePath: setCodebasePath,
+    getGeminiKeyStatus: getGeminiKeyStatus,
+    setGeminiApiKey: setGeminiApiKey,
     setOrbPosition: setOrbPosition,
     listAudioDevices: listAudioDevices,
-    onHistoryUpdated: onHistoryUpdated
+    onHistoryUpdated: onHistoryUpdated,
+    onPipelineStatus: onPipelineStatus,
+    onRecordingState: onRecordingState,
+    onPermissionNeeded: onPermissionNeeded
   };
 
   if (!hasTauri && global.console && global.console.warn) {

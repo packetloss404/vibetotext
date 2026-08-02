@@ -31,7 +31,7 @@ differently:
 
 - **Local transcription** via `whisper-rs` (bundled whisper.cpp), with a
   technical-vocabulary prompt and a hot-reloadable custom dictionary.
-- **AI cleanup & planning** via Google Gemini (`gemini-3.5-flash`). Optional —
+- **AI cleanup & planning** via Google Gemini (`gemini-3.6-flash`). Optional —
   falls back to raw text when no API key is set.
 - **Semantic code search** via the external [`greppy`](https://crates.io) CLI
   (optional; degrades gracefully when absent).
@@ -73,9 +73,16 @@ CPU-only by default. GPU backends are opt-in: `cargo tauri build --features meta
 - `~/.vibetotext/config.json` — audio device, whisper model, custom dictionary,
   codebase path (for greppy), overlay position.
 - Gemini key resolution: `GEMINI_API_KEY` / `GOOGLE_API_KEY` env →
-  `~/.vibetotext/.env` → `config.json`. Copy `.env.example` to get started.
+  `~/.vibetotext/.env` → legacy `config.json`. The Settings UI writes the
+  private `.env` file without returning the key to the webview.
 - **Models** download on first use to `~/.vibetotext/models/ggml-<model>.bin`
-  (nothing is bundled).
+  (nothing is bundled); downloads are size- and checksum-verified before use.
+
+The hidden `~/.vibetotext` path is retained as a compatibility data location so
+existing PacketVoice/VibeToText history and models are not split during the rename.
+
+The optional `local-api` feature requires `PACKETVOICE_LOCAL_API_TOKEN` and an
+`Authorization: Bearer <token>` header. It remains disabled in normal builds.
 
 ## Platform notes
 

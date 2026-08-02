@@ -83,6 +83,47 @@ pub fn list_input_devices() -> Vec<AudioDevice> {
         .collect()
 }
 
+/// Reconcile a stored device selection after the host enumeration order changes.
+/// The display name is the stable key when one is available; the old index is a
+/// fallback for backends that cannot provide useful names.
+pub(crate) fn resolve_input_device_index(
+    preferred_index: Option<i64>,
+    preferred_name: Option<&str>,
+) -> Option<i64> {
+    let devices = list_input_devices();
+    if devices.is_empty() {
+        return preferred_index.filter(|index| *index >= 0);
+    }
+
+    if let Some(name) = preferred_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        if let Some(index) = preferred_index.filter(|index| *index >= 0) {
+            if devices
+                .get(index as usize)
+                .is_some_and(|device| device.name == name)
+            {
+                return Some(index);
+            }
+        }
+
+        if let Some(device) = devices.iter().find(|device| device.name == name) {
+            if preferred_index != Some(device.index) {
+                tracing::info!(
+                    old_index = ?preferred_index,
+                    new_index = device.index,
+                    device = %name,
+                    "reconciled moved audio device"
+                );
+            }
+            return Some(device.index);
+        }
+    }
+
+    preferred_index.filter(|index| *index >= 0 && (*index as usize) < devices.len())
+}
+
 /// Full friendly names of active WASAPI capture endpoints, in
 /// `IMMDeviceCollection` order — which matches cpal's `input_devices()` order on
 /// the WASAPI host, so the returned vec is index-aligned with the cpal list.

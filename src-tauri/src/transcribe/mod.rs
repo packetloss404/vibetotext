@@ -54,11 +54,16 @@ impl Transcriber {
             .lock()
             .map_err(|_| anyhow::anyhow!("whisper context mutex poisoned"))?;
         if guard.is_none() {
-            let ctx =
-                WhisperContext::new_with_params(&self.model_path, WhisperContextParameters::default())
-                    .with_context(|| {
-                        format!("failed to load whisper model: {}", self.model_path.display())
-                    })?;
+            let ctx = WhisperContext::new_with_params(
+                &self.model_path,
+                WhisperContextParameters::default(),
+            )
+            .with_context(|| {
+                format!(
+                    "failed to load whisper model: {}",
+                    self.model_path.display()
+                )
+            })?;
             *guard = Some(ctx);
         }
         Ok(())

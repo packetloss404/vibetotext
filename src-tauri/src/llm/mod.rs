@@ -4,7 +4,7 @@
 //! - [`cleanup_text`] — refine rambling transcription into a clean prompt.
 //! - [`generate_plan`] — turn a voice description into a short implementation plan.
 //!
-//! Model id is **`gemini-3.5-flash`** (current GA per plan §3; the Python/macOS
+//! Model id is **`gemini-3.6-flash`** (current GA; the Python/macOS
 //! reference used the `gemini-3-flash-preview` preview id and the old Windows app
 //! used the now-shut-down `gemini-2.0-flash`).
 //!
@@ -18,15 +18,12 @@ use serde::Deserialize;
 use std::time::Duration;
 
 /// Gemini model id. GA / stable per plan §3.
-const MODEL: &str = "gemini-3.5-flash";
+const MODEL: &str = "gemini-3.6-flash";
 
 /// Per-request timeout, matching the Python `request_options={"timeout": 30}`.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-// Generation parameters, ported verbatim from llm.py.
-const CLEANUP_TEMPERATURE: f64 = 0.3;
 const CLEANUP_MAX_OUTPUT_TOKENS: u32 = 2048;
-const PLAN_TEMPERATURE: f64 = 0.4;
 const PLAN_MAX_OUTPUT_TOKENS: u32 = 4096;
 
 // ---------------------------------------------------------------------------
@@ -71,13 +68,12 @@ fn assemble_prompt(template: &str, text: &str) -> String {
 }
 
 /// Build the `generateContent` POST body as JSON.
-fn request_body(prompt: &str, temperature: f64, max_output_tokens: u32) -> serde_json::Value {
+fn request_body(prompt: &str, max_output_tokens: u32) -> serde_json::Value {
     serde_json::json!({
         "contents": [{
             "parts": [{ "text": prompt }]
         }],
         "generationConfig": {
-            "temperature": temperature,
             "maxOutputTokens": max_output_tokens,
         }
     })
@@ -123,7 +119,6 @@ fn generate(
     text: &str,
     api_key: &str,
     template: &str,
-    temperature: f64,
     max_output_tokens: u32,
 ) -> anyhow::Result<String> {
     if api_key.trim().is_empty() {
@@ -131,7 +126,7 @@ fn generate(
     }
 
     let prompt = assemble_prompt(template, text);
-    let body = request_body(&prompt, temperature, max_output_tokens);
+    let body = request_body(&prompt, max_output_tokens);
     // Serialize manually (and set Content-Type) rather than using
     // `RequestBuilder::json`, which would require reqwest's `json` feature that
     // isn't enabled in Cargo.toml.
@@ -171,29 +166,26 @@ fn generate(
 
 /// Clean up rambling transcribed `text` into a clear, refined prompt.
 ///
-/// Port of `cleanup_text` in `llm.py` (temperature 0.3, maxOutputTokens 2048).
+/// Uses a 2048-token output cap.
 /// Returns `Err` on HTTP/parse failure; the caller falls back to the raw text.
 pub fn cleanup_text(text: &str, api_key: &str) -> anyhow::Result<String> {
     generate(
         text,
         api_key,
         prompts::CLEANUP_PROMPT,
-        CLEANUP_TEMPERATURE,
         CLEANUP_MAX_OUTPUT_TOKENS,
     )
 }
 
 /// Generate a short markdown implementation plan from rambling `text`.
 ///
-/// Port of `generate_implementation_plan` in `llm.py` (temperature 0.4,
-/// maxOutputTokens 4096). Returns `Err` on HTTP/parse failure; the caller falls
+/// Uses a 4096-token output cap. Returns `Err` on HTTP/parse failure; the caller falls
 /// back to the raw text.
 pub fn generate_plan(text: &str, api_key: &str) -> anyhow::Result<String> {
     generate(
         text,
         api_key,
         prompts::IMPLEMENTATION_PLAN_PROMPT,
-        PLAN_TEMPERATURE,
         PLAN_MAX_OUTPUT_TOKENS,
     )
 }
@@ -233,21 +225,19 @@ mod tests {
 
     #[test]
     fn request_body_has_expected_shape() {
-        let body = request_body("PROMPT", 0.3, 2048);
+        let body = request_body("PROMPT", 2048);
         assert_eq!(body["contents"][0]["parts"][0]["text"], "PROMPT");
-        assert_eq!(body["generationConfig"]["temperature"], 0.3);
+        assert!(body["generationConfig"].get("temperature").is_none());
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 2048);
     }
 
     #[test]
     fn endpoint_uses_ga_model_and_no_key_in_url() {
         let url = endpoint();
-        assert!(url.contains("gemini-3.5-flash:generateContent"));
+        assert!(url.contains("gemini-3.6-flash:generateContent"));
         // The key must NOT be in the URL — it travels in the x-goog-api-key header.
         assert!(!url.contains("key="));
-        assert!(url.starts_with(
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-        ));
+        assert!(url.starts_with("https://generativelanguage.googleapis.com/v1beta/models/"));
     }
 
     #[test]

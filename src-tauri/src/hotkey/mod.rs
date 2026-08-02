@@ -2,7 +2,7 @@
 //!
 //! This module owns the chord state machine that turns global keyboard events
 //! into [`HotkeyEvent::Start`] / [`HotkeyEvent::Stop`] for the four (well, five)
-//! VibeToText [`Mode`]s. The actual OS event source sits behind the
+//! PacketVoice [`Mode`]s. The actual OS event source sits behind the
 //! [`HotkeyBackend`] trait so we can swap the X11/macOS [`RdevBackend`] for an
 //! evdev-based `hotkey-listener` backend when we add native Wayland (plan §3/§9,
 //! risk #1).
@@ -384,28 +384,28 @@ mod rdev_impl {
                             Vec::new()
                         } else {
                             match event.event_type {
-                            EventType::KeyPress(key) => {
-                                if let Some(m) = modifier_of(key) {
-                                    sm.on_modifier_change(m, true)
-                                } else if let Some(p) = printing_of(key) {
-                                    sm.on_printing_key(p, true)
-                                } else {
-                                    // Unrelated printing key while modifiers are
-                                    // held: deliberately NOT routed (no spurious
-                                    // START) — carry-forward (a).
-                                    Vec::new()
+                                EventType::KeyPress(key) => {
+                                    if let Some(m) = modifier_of(key) {
+                                        sm.on_modifier_change(m, true)
+                                    } else if let Some(p) = printing_of(key) {
+                                        sm.on_printing_key(p, true)
+                                    } else {
+                                        // Unrelated printing key while modifiers are
+                                        // held: deliberately NOT routed (no spurious
+                                        // START) — carry-forward (a).
+                                        Vec::new()
+                                    }
                                 }
-                            }
-                            EventType::KeyRelease(key) => {
-                                if let Some(m) = modifier_of(key) {
-                                    sm.on_modifier_change(m, false)
-                                } else if let Some(p) = printing_of(key) {
-                                    sm.on_printing_key(p, false)
-                                } else {
-                                    Vec::new()
+                                EventType::KeyRelease(key) => {
+                                    if let Some(m) = modifier_of(key) {
+                                        sm.on_modifier_change(m, false)
+                                    } else if let Some(p) = printing_of(key) {
+                                        sm.on_printing_key(p, false)
+                                    } else {
+                                        Vec::new()
+                                    }
                                 }
-                            }
-                            _ => Vec::new(),
+                                _ => Vec::new(),
                             }
                         };
                         for e in events {
@@ -446,8 +446,9 @@ impl HotkeyBackend for RdevBackend {
 /// On macOS this first checks [`permissions::ensure_accessibility`]; if not
 /// trusted it logs and still spawns the backend (so the OS prompt is shown and
 /// the listener begins delivering events once permission is granted).
-pub fn spawn(on_event: impl Fn(HotkeyEvent) + Send + 'static) {
-    if !permissions::ensure_accessibility() {
+pub fn spawn(on_event: impl Fn(HotkeyEvent) + Send + 'static) -> bool {
+    let permission_ready = permissions::ensure_accessibility();
+    if !permission_ready {
         tracing::warn!(
             "Accessibility permission not yet granted; global hotkeys will be \
              inert until the user grants it (macOS)."
@@ -458,6 +459,7 @@ pub fn spawn(on_event: impl Fn(HotkeyEvent) + Send + 'static) {
     thread::spawn(move || {
         backend.run(Box::new(on_event));
     });
+    permission_ready
 }
 
 // `RdevBackend` must be `Send` for `spawn` to move it onto a thread.
@@ -672,7 +674,10 @@ mod tests {
         let ev = sm.on_printing_key(PrintingKey::P, true);
         assert_eq!(
             ev,
-            vec![HotkeyEvent::Stop(Mode::Greppy), HotkeyEvent::Start(Mode::Plan)]
+            vec![
+                HotkeyEvent::Stop(Mode::Greppy),
+                HotkeyEvent::Start(Mode::Plan)
+            ]
         );
         assert_eq!(sm.active_mode(), Some(Mode::Plan));
     }

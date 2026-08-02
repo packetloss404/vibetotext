@@ -165,10 +165,11 @@ fn compute_bars_with_fft(fft: &Arc<dyn Fft<f32>>, samples: &[f32]) -> [f32; NUM_
     // index loop is intentional.
     #[allow(clippy::needless_range_loop)]
     for i in 0..NUM_BARS {
-        let lo = (MIN_FREQ_BIN as f32
-            + usable_bins * (i as f32 / NUM_BARS as f32).powf(2.5)) as usize;
+        let lo =
+            (MIN_FREQ_BIN as f32 + usable_bins * (i as f32 / NUM_BARS as f32).powf(2.5)) as usize;
         let mut hi = (MIN_FREQ_BIN as f32
-            + usable_bins * ((i + 1) as f32 / NUM_BARS as f32).powf(2.5)) as usize;
+            + usable_bins * ((i + 1) as f32 / NUM_BARS as f32).powf(2.5))
+            as usize;
         hi = hi.max(lo + 1); // at least one bin per bar
 
         // Average the normalized spectrum over [lo, hi). Guard the upper bound
@@ -229,10 +230,11 @@ mod tests {
     fn expected_bar_for_bin(bin: usize) -> usize {
         let usable_bins = (SPECTRUM_LEN - MIN_FREQ_BIN) as f32;
         for i in 0..NUM_BARS {
-            let lo = (MIN_FREQ_BIN as f32
-                + usable_bins * (i as f32 / NUM_BARS as f32).powf(2.5)) as usize;
+            let lo = (MIN_FREQ_BIN as f32 + usable_bins * (i as f32 / NUM_BARS as f32).powf(2.5))
+                as usize;
             let mut hi = (MIN_FREQ_BIN as f32
-                + usable_bins * ((i + 1) as f32 / NUM_BARS as f32).powf(2.5)) as usize;
+                + usable_bins * ((i + 1) as f32 / NUM_BARS as f32).powf(2.5))
+                as usize;
             hi = hi.max(lo + 1).min(SPECTRUM_LEN);
             if bin >= lo && bin < hi {
                 return i;
@@ -290,7 +292,10 @@ mod tests {
         // A 0.0003-amplitude sine has rms ≈ 0.0002 -> base_level ≈ 0.02 < 0.08.
         let samples = sine(440.0, 16000.0, FFT_SIZE, 0.0003);
         let bars = compute_bars(&samples);
-        assert_eq!(bars, [0.0; NUM_BARS], "near-silent input not gated: {bars:?}");
+        assert_eq!(
+            bars, [0.0; NUM_BARS],
+            "near-silent input not gated: {bars:?}"
+        );
     }
 
     #[test]

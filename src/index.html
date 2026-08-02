@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VibeToText History</title>
+  <title>PacketVoice History</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -29,6 +29,11 @@
         </span>
       </div>
     </header>
+
+    <div class="pipeline-banner" id="pipeline-banner" role="status" aria-live="polite" hidden>
+      <span class="pipeline-indicator" aria-hidden="true"></span>
+      <span id="pipeline-message"></span>
+    </div>
 
     <div class="tabs" id="tabs">
       <button class="tab active" data-mode="all">All</button>
@@ -119,11 +124,40 @@
           <option value="base">base</option>
           <option value="small" selected>small (default)</option>
           <option value="medium">medium</option>
-          <option value="large">large</option>
-          <option value="large-v3">large-v3</option>
-          <option value="large-v3-turbo">large-v3-turbo — most accurate</option>
+          <option value="large-v1">large-v1</option>
+          <option value="large-v2">large-v2</option>
+          <option value="large-v3">large-v3 — most accurate</option>
+          <option value="large-v3-turbo">large-v3-turbo — faster large model</option>
         </select>
         <p class="settings-status" id="model-status"></p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Codebase Context</h3>
+        <p class="settings-description">Directory searched by Greppy and used for code-aware transcription context.</p>
+        <div class="settings-input-row">
+          <input type="text" id="codebase-path" class="settings-input" placeholder="D:\projects\my-project">
+          <button id="codebase-save" class="orb-custom-btn">Save</button>
+        </div>
+        <p class="settings-status" id="codebase-status"></p>
+      </div>
+
+      <div class="settings-section">
+        <h3>Gemini</h3>
+        <p class="settings-description">Optional API key for Cleanup and Plan modes. The key is stored in a private backend file and is never returned to this page.</p>
+        <div class="settings-input-row">
+          <input type="password" id="gemini-key" class="settings-input" autocomplete="off" placeholder="Paste a Gemini API key">
+          <button id="gemini-save" class="orb-custom-btn">Save</button>
+          <button id="gemini-clear" class="settings-secondary-btn">Clear stored key</button>
+        </div>
+        <p class="settings-status" id="gemini-status"></p>
+      </div>
+
+      <div class="settings-section danger-section">
+        <h3>History</h3>
+        <p class="settings-description">Permanently delete all locally stored transcription history.</p>
+        <button id="history-clear" class="settings-danger-btn">Clear transcription history</button>
+        <p class="settings-status" id="history-status"></p>
       </div>
     </div>
 

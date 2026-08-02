@@ -89,17 +89,21 @@ mod tests {
 
     #[test]
     fn drops_each_known_artifact() {
-        for tok in ["[end]", "[silence]", "[music]", "[applause]", "[inaudible]", "[no_speech]"] {
+        for tok in [
+            "[end]",
+            "[silence]",
+            "[music]",
+            "[applause]",
+            "[inaudible]",
+            "[no_speech]",
+        ] {
             assert_eq!(filter(tok), "", "token {tok} should be filtered");
         }
     }
 
     #[test]
     fn keeps_real_text_around_artifacts() {
-        assert_eq!(
-            filter("hello [silence] world"),
-            "hello world"
-        );
+        assert_eq!(filter("hello [silence] world"), "hello world");
         assert_eq!(filter("ship it [blank_audio]"), "ship it");
         assert_eq!(filter("[silence] start of speech"), "start of speech");
     }
