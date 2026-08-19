@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::DbError;
 
+#[allow(unused_imports)]
+use phf::phf_set;
+
 /// Typing baseline used for the "time saved" calculation (Python: `typing_wpm`).
 const TYPING_WPM: f64 = 40.0;
 
@@ -210,7 +213,11 @@ fn word_frequency(texts: &[String]) -> (Vec<(String, i64)>, Vec<String>) {
 /// English stopwords excluded from word-frequency analysis. Copied verbatim from
 /// the Python `STOPWORDS` set in `history.py` (deduplicated where the Python
 /// source had duplicates — `set` membership is identical).
-static STOPWORDS: &[&str] = &[
+///
+/// `phf::Set` builds a perfect-hash lookup table at compile time, so each
+/// `.contains()` is O(1) with no init cost and no runtime allocation —
+/// replacing the previous `&[&str]` linear scan.
+static STOPWORDS: phf::Set<&'static str> = phf_set! {
     "a",
     "an",
     "the",
@@ -353,7 +360,7 @@ static STOPWORDS: &[&str] = &[
     "something",
     "anything",
     "everything",
-];
+};
 
 #[cfg(test)]
 mod tests {

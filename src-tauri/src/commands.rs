@@ -104,7 +104,8 @@ pub fn get_statistics(
     mode: Option<String>,
 ) -> Result<Statistics, String> {
     let db = open_db(&state)?;
-    db.get_statistics(mode.as_deref()).map_err(|e| e.to_string())
+    db.get_statistics(mode.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 /// Return the current pipeline readiness/admission state so a newly-loaded

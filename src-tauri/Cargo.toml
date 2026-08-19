@@ -44,6 +44,7 @@ dirs = "6.0"
 
 anyhow = "1.0"
 thiserror = "2.0"
+phf = { version = "0.11", features = ["macros"] }
 
 # Phase 2 audio + transcription.
 # cpal 0.17.3 pinned (spike-confirmed known-good, plan §3). WASAPI verified on

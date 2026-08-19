@@ -550,13 +550,23 @@ mod tests {
 
             // 1 transcribe entry (2 words) + 1 cleanup entry (3 words).
             let _ = super::entries::add_entry(
-                &mut conn, stub_scorer, "alpha beta",
-                "transcribe", "2026-08-19T00:00:00Z", Some(2.0),
-            ).unwrap();
+                &mut conn,
+                stub_scorer,
+                "alpha beta",
+                "transcribe",
+                "2026-08-19T00:00:00Z",
+                Some(2.0),
+            )
+            .unwrap();
             let _ = super::entries::add_entry(
-                &mut conn, stub_scorer, "gamma delta epsilon",
-                "cleanup", "2026-08-19T00:00:01Z", Some(3.0),
-            ).unwrap();
+                &mut conn,
+                stub_scorer,
+                "gamma delta epsilon",
+                "cleanup",
+                "2026-08-19T00:00:01Z",
+                Some(3.0),
+            )
+            .unwrap();
             drop(conn);
 
             let s_all = db.get_statistics(None).unwrap();
@@ -567,8 +577,7 @@ mod tests {
             assert_eq!(s_t.total_sessions, 1);
             assert_eq!(s_t.total_words, 2);
             // Word frequency only sees transcribe text -> "alpha", "beta".
-            let t_map: std::collections::HashMap<_, _> =
-                s_t.common_words.iter().cloned().collect();
+            let t_map: std::collections::HashMap<_, _> = s_t.common_words.iter().cloned().collect();
             assert_eq!(t_map.get("alpha"), Some(&1));
             assert_eq!(t_map.get("beta"), Some(&1));
             assert!(!t_map.contains_key("gamma"));
@@ -576,8 +585,7 @@ mod tests {
             let s_c = db.get_statistics(Some("cleanup")).unwrap();
             assert_eq!(s_c.total_sessions, 1);
             assert_eq!(s_c.total_words, 3);
-            let c_map: std::collections::HashMap<_, _> =
-                s_c.common_words.iter().cloned().collect();
+            let c_map: std::collections::HashMap<_, _> = s_c.common_words.iter().cloned().collect();
             assert_eq!(c_map.get("gamma"), Some(&1));
             assert!(!c_map.contains_key("alpha"));
         }
