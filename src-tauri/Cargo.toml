@@ -66,6 +66,13 @@ sha1 = "0.10"
 # needs macOS Accessibility; abstracted behind a trait for a later Wayland swap.
 # Windows verified by the spike; macOS/Linux written-but-unverified here.
 rdev = "0.5.3"
+
+# Optional: `keytap` is a newer, cross-platform keyboard listener with native
+# Wayland support, clean Drop-based shutdown, and macOS permission detection at
+# startup. It supersedes rdev on every axis (see `docs/advanced-improvements-2026-08-19.md`
+# for the design tradeoffs); the `keytap-backend` feature switches the
+# `HotkeyBackend` impl over. rdev stays available as a fallback.
+keytap = { version = "0.4", optional = true }
 # Cross-platform input simulation for auto-paste (paste.rs). Always copy-to-
 # clipboard first so a paste failure degrades to manual paste (port of
 # output.py fallback semantics).
@@ -108,6 +115,10 @@ windows = { version = "0.61", features = [
 # seam for swapping in a hotkey-listener/evdev backend for native Wayland later.
 default = ["rdev-backend"]
 rdev-backend = []
+# keytap-backend activates the keytap listener (cross-platform incl. native
+# Wayland; clean Drop; macOS permission detected at startup). Mutually
+# preferable to rdev; off by default while it stabilises.
+keytap-backend = ["dep:keytap"]
 metal = ["whisper-rs/metal"]
 cuda = ["whisper-rs/cuda"]
 vulkan = ["whisper-rs/vulkan"]

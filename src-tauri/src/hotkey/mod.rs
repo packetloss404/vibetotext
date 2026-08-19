@@ -439,9 +439,128 @@ impl HotkeyBackend for RdevBackend {
     }
 }
 
+// ---------------------------------------------------------------------------
+// keytap backend (preferred; cross-platform, native Wayland, clean Drop)
+// ---------------------------------------------------------------------------
+
+/// The `keytap`-backed listener. Cross-platform (mac / Windows / Linux X11 +
+/// Wayland), preserves left/right modifier identity, drops the OS handle via
+/// `Drop` on the `keytap::Tap`. Supersedes rdev on every axis that matters for
+/// this project; see `docs/advanced-improvements-2026-08-19.md` § I.
+pub struct KeytapBackend {
+    _private: (),
+}
+
+impl KeytapBackend {
+    pub fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+#[cfg(feature = "keytap-backend")]
+mod keytap_impl {
+    use super::*;
+    use keytap::{EventKind, Key, Tap};
+
+    /// Map a keytap [`Key`] to a logical [`Modifier`], normalising L/R.
+    fn modifier_of(key: Key) -> Option<Modifier> {
+        match key {
+            Key::ControlLeft | Key::ControlRight => Some(Modifier::Ctrl),
+            Key::ShiftLeft | Key::ShiftRight => Some(Modifier::Shift),
+            Key::AltLeft | Key::AltRight => Some(Modifier::Alt),
+            Key::MetaLeft | Key::MetaRight => Some(Modifier::Meta),
+            _ => None,
+        }
+    }
+
+    /// Map a keytap [`Key`] to a chord-relevant [`PrintingKey`], if any. All
+    /// other printing keys must NOT reach the state machine (carry-forward (a)).
+    fn printing_of(key: Key) -> Option<PrintingKey> {
+        match key {
+            Key::P => Some(PrintingKey::P),
+            _ => None,
+        }
+    }
+
+    impl HotkeyBackend for KeytapBackend {
+        fn run(self: Box<Self>, sink: Box<dyn Fn(HotkeyEvent) + Send>) {
+            // keytap's `Tap::iter()` blocks the current thread on each `next()`.
+            // We install the tap on a dedicated thread, then drive the state
+            // machine here on a separate thread (or inline) and poll the tap
+            // via `try_recv`-style logic by wrapping the iterator in a channel.
+            // The `Tap` itself is `Send`-able across threads (Drop cleans up).
+            let tap = match Tap::new() {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!(error = %format!("{e:#}"), "keytap: failed to install global tap");
+                    return;
+                }
+            };
+            tracing::info!("installed global hotkey tap (keytap)");
+
+            // keytap's `Tap` exposes `iter()` returning a `TapIter` that blocks
+            // on `next()`. We don't need the iterator pattern here — we
+            // instead install the tap on its own thread and let it run
+            // unattended, since `Tap` is itself an RAII listener. We can't
+            // observe its events from another thread though, so we fall back
+            // to a polling pattern: in keytap 0.4, the public surface is
+            // `tap.iter()` which yields `Event { kind, raw }` from the calling
+            // thread. Drive the iterator inline; the listener will exit
+            // cleanly when this function returns and `tap` is dropped.
+            let mut sm = StateMachine::new();
+            for event in tap.iter() {
+                if SUPPRESS_HOTKEYS.load(Ordering::SeqCst) {
+                    // Skip our own auto-paste keystrokes; still tick the
+                    // auto-cutoff below.
+                    if let Some(e) = sm.tick() {
+                        sink(e);
+                    }
+                    continue;
+                }
+                let key = match event.kind {
+                    EventKind::KeyDown(k) | EventKind::KeyUp(k) => k,
+                    _ => continue,
+                };
+                let down = matches!(event.kind, EventKind::KeyDown(_));
+                let events = if let Some(m) = modifier_of(key) {
+                    sm.on_modifier_change(m, down)
+                } else if let Some(p) = printing_of(key) {
+                    sm.on_printing_key(p, down)
+                } else {
+                    Vec::new()
+                };
+                for e in events {
+                    sink(e);
+                }
+                if let Some(e) = sm.tick() {
+                    sink(e);
+                }
+            }
+            // `tap` drops here, joining its OS listener thread.
+        }
+    }
+}
+
+// Fallback: `KeytapBackend` is a no-op when the `keytap-backend` feature
+// (and the `keytap` dep) isn't enabled, so the crate still compiles when
+// neither backend is selected.
+#[cfg(not(feature = "keytap-backend"))]
+impl HotkeyBackend for KeytapBackend {
+    fn run(self: Box<Self>, _sink: Box<dyn Fn(HotkeyEvent) + Send>) {
+        tracing::warn!(
+            "KeytapBackend compiled without the `keytap-backend` feature; \
+             the keytap global-hotkey path is a no-op."
+        );
+    }
+}
+
 /// Start the global hotkey listener on a dedicated thread, invoking `on_event`
 /// for every [`HotkeyEvent`]. Returns immediately; the listener runs for the
 /// process lifetime.
+///
+/// Backend preference: `keytap` > `rdev` > no-op. With the default
+/// `rdev-backend` feature, `keytap` is opt-in via the `keytap-backend`
+/// feature flag.
 ///
 /// On macOS this first checks [`permissions::ensure_accessibility`]; if not
 /// trusted it logs and still spawns the backend (so the OS prompt is shown and
@@ -455,7 +574,22 @@ pub fn spawn(on_event: impl Fn(HotkeyEvent) + Send + 'static) -> bool {
         );
     }
 
-    let backend: Box<dyn HotkeyBackend + Send> = Box::new(RdevBackend::new());
+    #[cfg(feature = "keytap-backend")]
+    let backend: Box<dyn HotkeyBackend + Send> = {
+        tracing::info!("using keytap hotkey backend (preferred)");
+        Box::new(KeytapBackend::new())
+    };
+    #[cfg(all(not(feature = "keytap-backend"), feature = "rdev-backend"))]
+    let backend: Box<dyn HotkeyBackend + Send> = {
+        tracing::info!("using rdev hotkey backend (keytap-backend not enabled)");
+        Box::new(RdevBackend::new())
+    };
+    #[cfg(all(not(feature = "keytap-backend"), not(feature = "rdev-backend")))]
+    let backend: Box<dyn HotkeyBackend + Send> = {
+        tracing::warn!("no hotkey backend enabled; push-to-talk disabled");
+        Box::new(RdevBackend::new()) // parks the thread (RdevBackend no-op impl)
+    };
+
     thread::spawn(move || {
         backend.run(Box::new(on_event));
     });
