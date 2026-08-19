@@ -1,6 +1,6 @@
 [package]
 name = "vibetotext"
-version = "0.1.0"
+version = "2.0.0"
 description = "VibeToText - cross-platform push-to-talk transcription"
 authors = ["Ian Walmsley", "dyoburon"]
 edition = "2021"
