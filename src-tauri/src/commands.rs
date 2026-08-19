@@ -88,7 +88,8 @@ pub fn get_entries(
         None | Some("all") | Some("") => None,
         Some(m) => Some(m),
     };
-    db.get_entries(mode_filter, limit).map_err(|e| e.to_string())
+    db.get_entries(mode_filter, limit)
+        .map_err(|e| e.to_string())
 }
 
 /// Aggregate statistics over all history (sessions, words, avg WPM, time saved,

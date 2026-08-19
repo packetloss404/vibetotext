@@ -298,12 +298,22 @@ mod tests {
             // interleaved transcribe rows and return the 3rd and 5th newest.
             db.add_entry("cleanup-newest", "cleanup", "2026-06-05T10:00:00", None)
                 .unwrap();
-            db.add_entry("transcribe-mid-1", "transcribe", "2026-06-04T10:00:00", None)
-                .unwrap();
+            db.add_entry(
+                "transcribe-mid-1",
+                "transcribe",
+                "2026-06-04T10:00:00",
+                None,
+            )
+            .unwrap();
             db.add_entry("cleanup-mid-2", "cleanup", "2026-06-03T10:00:00", None)
                 .unwrap();
-            db.add_entry("transcribe-mid-2", "transcribe", "2026-06-02T10:00:00", None)
-                .unwrap();
+            db.add_entry(
+                "transcribe-mid-2",
+                "transcribe",
+                "2026-06-02T10:00:00",
+                None,
+            )
+            .unwrap();
             db.add_entry("cleanup-oldest", "cleanup", "2026-06-01T10:00:00", None)
                 .unwrap();
 
