@@ -1961,6 +1961,7 @@ function renderAnalytics(entries) {
     allContainers.forEach(id => {
       d3.select(id).html('<div class="analytics-empty">No transcriptions yet</div>');
     });
+    cachedAnalyticsData = null;
     return;
   }
 
