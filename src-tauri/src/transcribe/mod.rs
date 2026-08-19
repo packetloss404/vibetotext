@@ -53,19 +53,7 @@ impl Transcriber {
             .ctx
             .lock()
             .map_err(|_| anyhow::anyhow!("whisper context mutex poisoned"))?;
-        if guard.is_none() {
-            let ctx = WhisperContext::new_with_params(
-                &self.model_path,
-                WhisperContextParameters::default(),
-            )
-            .with_context(|| {
-                format!(
-                    "failed to load whisper model: {}",
-                    self.model_path.display()
-                )
-            })?;
-            *guard = Some(ctx);
-        }
+        self.ensure_loaded(&mut guard)?;
         Ok(())
     }
 
@@ -89,22 +77,7 @@ impl Transcriber {
             .ctx
             .lock()
             .map_err(|_| anyhow::anyhow!("whisper context mutex poisoned"))?;
-
-        // Lazy load on first use (CPU-only: default params leave use_gpu off).
-        if guard.is_none() {
-            let ctx = WhisperContext::new_with_params(
-                &self.model_path,
-                WhisperContextParameters::default(),
-            )
-            .with_context(|| {
-                format!(
-                    "failed to load whisper model: {}",
-                    self.model_path.display()
-                )
-            })?;
-            *guard = Some(ctx);
-        }
-        let ctx = guard.as_ref().expect("context loaded above");
+        let ctx = self.ensure_loaded(&mut guard)?;
 
         let mut state = ctx
             .create_state()
@@ -142,6 +115,31 @@ impl Transcriber {
         }
 
         Ok(artifacts::filter(&joined))
+    }
+
+    /// Load the `WhisperContext` if it hasn't been loaded yet, and return a
+    /// borrow of the loaded context. Caller must already hold the `ctx` mutex
+    /// guard so the borrow is race-free. The `WhisperContext` is reentrant-safe
+    /// to load but not to use from multiple threads, which is why the mutex
+    /// guards the whole call.
+    fn ensure_loaded<'g>(
+        &self,
+        guard: &'g mut Option<WhisperContext>,
+    ) -> Result<&'g WhisperContext> {
+        if guard.is_none() {
+            let ctx = WhisperContext::new_with_params(
+                &self.model_path,
+                WhisperContextParameters::default(),
+            )
+            .with_context(|| {
+                format!(
+                    "failed to load whisper model: {}",
+                    self.model_path.display()
+                )
+            })?;
+            *guard = Some(ctx);
+        }
+        Ok(guard.as_ref().expect("just loaded above"))
     }
 }
 
