@@ -1,8 +1,6 @@
 // Analytics Charts for VibeToText
 // Uses D3.js v7 for visualizations
 
-console.log('[Analytics] analytics.js loaded, D3 available:', typeof d3 !== 'undefined');
-
 const CHART_COLORS = {
   accent: '#fbbf24',      // Amber - sole accent color
   green: '#fbbf24',       // Mapped to amber (monochrome theme)
@@ -1222,78 +1220,6 @@ function renderGoals(containerId, todayData, thisWeekWords) {
     .style('width', `${weeklyPct}%`);
 }
 
-// Render sessions today as a radial gauge
-function renderSessionsToday(containerId, todayData) {
-  const container = d3.select(containerId);
-  container.html('');
-
-  const sessions = todayData.entries || 0;
-  const targetSessions = 10; // Target sessions per day
-  const percentage = Math.min(100, (sessions / targetSessions) * 100);
-
-  const width = 140;
-  const height = 110;
-  const thickness = 10;
-  const radius = Math.min(width, height) / 2 - thickness;
-
-  const svg = container.append('svg')
-    .attr('width', width)
-    .attr('height', height)
-    .append('g')
-    .attr('transform', `translate(${width / 2},${height / 2 + 10})`);
-
-  // Background arc
-  const arc = d3.arc()
-    .innerRadius(radius - thickness)
-    .outerRadius(radius)
-    .startAngle(-Math.PI * 0.75)
-    .endAngle(Math.PI * 0.75);
-
-  svg.append('path')
-    .attr('d', arc)
-    .attr('fill', CHART_COLORS.bg);
-
-  // Foreground arc (progress)
-  const progressAngle = -Math.PI * 0.75 + (percentage / 100) * Math.PI * 1.5;
-  const progressArc = d3.arc()
-    .innerRadius(radius - thickness)
-    .outerRadius(radius)
-    .startAngle(-Math.PI * 0.75)
-    .endAngle(progressAngle);
-
-  svg.append('path')
-    .attr('d', progressArc)
-    .attr('fill', percentage >= 100 ? CHART_COLORS.green : CHART_COLORS.accent);
-
-  // Center text
-  svg.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'middle')
-    .attr('y', -8)
-    .attr('fill', CHART_COLORS.accent)
-    .attr('font-size', '26px')
-    .attr('font-weight', '600')
-    .text(sessions);
-
-  svg.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('dominant-baseline', 'middle')
-    .attr('y', 12)
-    .attr('fill', CHART_COLORS.muted)
-    .attr('font-size', '10px')
-    .text('sessions');
-
-  // Duration info below
-  const duration = todayData.duration || 0;
-  const minutes = Math.floor(duration / 60);
-  svg.append('text')
-    .attr('text-anchor', 'middle')
-    .attr('y', 38)
-    .attr('fill', CHART_COLORS.muted)
-    .attr('font-size', '9px')
-    .text(`${minutes}m recorded`);
-}
-
 // Render peak hours bar chart
 function renderPeakHours(containerId, activityMatrix) {
   const container = d3.select(containerId);
@@ -1685,71 +1611,6 @@ function renderWpmByHour(containerId, avgWpmByHour) {
     .call(d3.axisBottom(x).tickValues([0, 6, 12, 18]).tickFormat(d => `${d}:00`));
 }
 
-// Render session histogram
-function renderSessionHistogram(containerId, sessionDurations) {
-  const container = d3.select(containerId);
-  container.html('');
-
-  if (sessionDurations.length === 0) {
-    container.append('div').attr('class', 'analytics-empty').text('No data yet');
-    return;
-  }
-
-  const margin = { top: 20, right: 20, bottom: 30, left: 50 };
-  const width = container.node().getBoundingClientRect().width - margin.left - margin.right;
-  const height = 120 - margin.top - margin.bottom;
-
-  if (width <= 0) return;
-
-  const svg = container.append('svg')
-    .attr('width', width + margin.left + margin.right)
-    .attr('height', height + margin.top + margin.bottom)
-    .append('g')
-    .attr('transform', `translate(${margin.left},${margin.top})`);
-
-  // Create histogram bins
-  const maxDuration = Math.min(d3.max(sessionDurations), 60); // Cap at 60s for readability
-  const x = d3.scaleLinear()
-    .domain([0, maxDuration])
-    .range([0, width]);
-
-  const histogram = d3.histogram()
-    .domain(x.domain())
-    .thresholds(x.ticks(12));
-
-  const bins = histogram(sessionDurations.filter(d => d <= maxDuration));
-
-  const y = d3.scaleLinear()
-    .domain([0, d3.max(bins, d => d.length)])
-    .range([height, 0]);
-
-  // Bars
-  svg.selectAll('.bar')
-    .data(bins)
-    .enter()
-    .append('rect')
-    .attr('x', d => x(d.x0) + 1)
-    .attr('y', d => y(d.length))
-    .attr('width', d => Math.max(0, x(d.x1) - x(d.x0) - 2))
-    .attr('height', d => height - y(d.length))
-    .attr('fill', CHART_COLORS.purple)
-    .attr('rx', 2)
-    .on('mouseover', (event, d) => {
-      showTooltip(event, `${d.x0.toFixed(0)}-${d.x1.toFixed(0)}s: ${d.length} sessions`);
-    })
-    .on('mouseout', hideTooltip);
-
-  // Axes
-  svg.append('g')
-    .attr('class', 'axis')
-    .attr('transform', `translate(0,${height})`)
-    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${d}s`));
-
-  svg.append('g')
-    .attr('class', 'axis')
-    .call(d3.axisLeft(y).ticks(4));
-}
-
 // Render period comparison
 function renderPeriodComparison(containerId, thisWeekData, lastWeekData) {
   const container = d3.select(containerId);
@@ -2086,15 +1947,13 @@ function renderTopicSpeedMood(containerId, topicSpeedMood) {
 
 // Main render function called from renderer.js
 function renderAnalytics(entries) {
-  console.log('[Analytics] renderAnalytics called with', entries ? entries.length : 0, 'entries');
-
   const allContainers = [
-    '#streaks-card', '#records-card', '#topic-speed-mood', '#goals-card', '#sessions-today',
+    '#streaks-card', '#records-card', '#topic-speed-mood', '#goals-card',
     '#activity-heatmap', '#activity-yearly', '#peak-hours',
     '#words-chart', '#time-saved-chart', '#wpm-chart', '#mode-donut',
     '#period-comparison', '#filler-words', '#common-phrases',
     '#new-words-week', '#reading-level', '#vocab-growth', '#word-length-dist', '#rare-words',
-    '#wpm-by-hour', '#session-histogram',
+    '#wpm-by-hour',
     '#word-cloud', '#sentiment-chart'
   ];
 
@@ -2172,33 +2031,36 @@ window.addEventListener('resize', () => {
   }, 100);
 });
 
-// Activity heatmap tab switching
-document.addEventListener('DOMContentLoaded', () => {
-  const tabs = document.querySelectorAll('.activity-tab');
-  const hourlyView = document.getElementById('activity-heatmap');
-  const yearlyView = document.getElementById('activity-yearly');
+// Activity heatmap tab switching. The script tag is at the end of <body>, so
+// the .activity-tab buttons exist by the time we get here — no need to wait
+// for DOMContentLoaded (the previous wrapper had a subtle ordering bug where
+// the listener was registered after the event in some load paths).
+const activityTabs = document.querySelectorAll('.activity-tab');
+const hourlyView = document.getElementById('activity-heatmap');
+const yearlyView = document.getElementById('activity-yearly');
 
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      // Update active tab
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-
-      // Switch view and re-render
-      const view = tab.dataset.view;
-      if (view === 'hourly') {
-        hourlyView.style.display = 'block';
-        yearlyView.style.display = 'none';
-        if (cachedAnalyticsData) {
-          renderActivityHeatmap('#activity-heatmap', cachedAnalyticsData.activityMatrix);
-        }
-      } else {
-        hourlyView.style.display = 'none';
-        yearlyView.style.display = 'block';
-        if (cachedAnalyticsData) {
-          renderYearlyHeatmap('#activity-yearly', cachedAnalyticsData.dailyData);
-        }
-      }
+activityTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    activityTabs.forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
     });
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+
+    const view = tab.dataset.view;
+    if (view === 'hourly') {
+      hourlyView.style.display = 'block';
+      yearlyView.style.display = 'none';
+      if (cachedAnalyticsData) {
+        renderActivityHeatmap('#activity-heatmap', cachedAnalyticsData.activityMatrix);
+      }
+    } else {
+      hourlyView.style.display = 'none';
+      yearlyView.style.display = 'block';
+      if (cachedAnalyticsData) {
+        renderYearlyHeatmap('#activity-yearly', cachedAnalyticsData.dailyData);
+      }
+    }
   });
 });
