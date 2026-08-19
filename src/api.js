@@ -83,6 +83,10 @@
     return invoke('set_codebase_path', { path: path });
   }
 
+  function getCodebasePathStatus() {
+    return invoke('get_codebase_path_status');
+  }
+
   function getGeminiKeyStatus() {
     return invoke('get_gemini_key_status');
   }
@@ -147,6 +151,7 @@
     setAudioDevice: setAudioDevice,
     setWhisperModel: setWhisperModel,
     setCodebasePath: setCodebasePath,
+    getCodebasePathStatus: getCodebasePathStatus,
     getGeminiKeyStatus: getGeminiKeyStatus,
     setGeminiApiKey: setGeminiApiKey,
     setOrbPosition: setOrbPosition,

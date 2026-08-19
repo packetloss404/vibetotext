@@ -180,6 +180,7 @@ pub fn run() {
             commands::remove_word,
             commands::set_whisper_model,
             commands::set_codebase_path,
+            commands::get_codebase_path_status,
             commands::get_gemini_key_status,
             commands::set_gemini_api_key,
             commands::set_orb_position,

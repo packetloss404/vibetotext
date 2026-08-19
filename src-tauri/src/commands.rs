@@ -311,6 +311,54 @@ pub fn set_codebase_path(path: Option<String>) -> Result<Value, String> {
     cfg_for_frontend(&cfg)
 }
 
+/// Status of the configured codebase path: whether it still exists on disk and
+/// is readable, so the UI can surface a stale-path warning before the user hits
+/// a confusing greppy failure.
+///
+/// `last_checked` is a Unix-epoch second the IPC layer populated. `None` when
+/// no path is configured.
+#[derive(Debug, serde::Serialize)]
+pub struct CodebasePathStatus {
+    pub path: Option<String>,
+    pub exists: bool,
+    pub readable: bool,
+    pub last_checked: u64,
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Check the configured codebase path without mutating config. Cheap — a single
+/// `metadata()` syscall. The frontend calls this on settings-tab open and after
+/// every `set_codebase_path` to keep the badge in sync.
+#[tauri::command]
+pub fn get_codebase_path_status() -> Result<CodebasePathStatus, String> {
+    let cfg = load_cfg()?;
+    let path = cfg.codebase_path.clone();
+    let (exists, readable) = match path.as_deref() {
+        Some(p) => {
+            let md = std::fs::metadata(p);
+            let exists = md.is_ok();
+            let readable = md
+                .as_ref()
+                .map(|m| m.permissions().readonly() == false)
+                .unwrap_or(false);
+            (exists, readable)
+        }
+        None => (false, false),
+    };
+    Ok(CodebasePathStatus {
+        path,
+        exists,
+        readable,
+        last_checked: now_unix_secs(),
+    })
+}
+
 /// Return only the source of the effective Gemini key, never the secret itself.
 #[tauri::command]
 pub fn get_gemini_key_status() -> Result<Option<String>, String> {

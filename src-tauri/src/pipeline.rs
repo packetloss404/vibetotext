@@ -403,6 +403,20 @@ impl Worker {
     /// text to paste. Every fallible branch degrades to `raw` on error/missing
     /// config (parity with `cli.py`'s "failed, using original").
     fn apply_mode(&self, mode: Mode, raw: &str, config: &AppConfig) -> String {
+        // Pre-check: if a codebase path is configured but the directory is gone
+        // (or unreadable), surface a clear warning and degrade to raw text
+        // instead of letting greppy fail with a less helpful error.
+        if let Some(p) = config.codebase_path.as_deref() {
+            if !std::path::Path::new(p).is_dir() {
+                tracing::warn!(
+                    path = p,
+                    "configured codebase_path does not exist; falling back to raw text"
+                );
+                emit_pipeline_status(&self.app, "codebase_path_missing", Some(mode));
+                return raw.to_string();
+            }
+        }
+
         match mode {
             // Transcribe: raw, optionally with greppy code-context appended.
             Mode::Transcribe => {

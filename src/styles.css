@@ -1397,6 +1397,14 @@ body {
   margin-top: 12px;
 }
 
+.codebase-status-ok {
+  color: #86efac;
+}
+
+.codebase-status-warn {
+  color: #fca5a5;
+}
+
 /* Orb Preset Buttons */
 .orb-presets {
   display: grid;

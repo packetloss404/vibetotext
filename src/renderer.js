@@ -471,6 +471,32 @@ async function renderSettings() {
   document.getElementById('model-select').value = model;
   document.getElementById('codebase-path').value = config.codebase_path || '';
   await refreshGeminiStatus();
+  await refreshCodebasePathStatus();
+}
+
+async function refreshCodebasePathStatus() {
+  const statusEl = document.getElementById('codebase-status');
+  try {
+    const status = await vtt.getCodebasePathStatus();
+    if (!status.path) {
+      statusEl.textContent = '';
+      statusEl.className = 'settings-status codebase-status';
+      return;
+    }
+    if (status.exists && status.readable) {
+      statusEl.textContent = 'Path is valid';
+      statusEl.className = 'settings-status codebase-status codebase-status-ok';
+    } else if (!status.exists) {
+      statusEl.textContent = 'Path no longer exists on disk; Greppy will fall back to raw text';
+      statusEl.className = 'settings-status codebase-status codebase-status-warn';
+    } else {
+      statusEl.textContent = 'Path is not readable; check filesystem permissions';
+      statusEl.className = 'settings-status codebase-status codebase-status-warn';
+    }
+  } catch (err) {
+    statusEl.textContent = String(err);
+    statusEl.className = 'settings-status codebase-status codebase-status-warn';
+  }
 }
 
 async function saveOrbPreset(preset) {
@@ -528,6 +554,9 @@ async function saveCodebasePath() {
     const config = await vtt.setCodebasePath(input.value.trim() || null);
     input.value = config.codebase_path || '';
     showSettingsStatus('codebase-status', config.codebase_path ? 'Codebase path saved' : 'Codebase context disabled');
+    // Re-poll status so the badge reflects the new path's existence immediately
+    // (a saved-but-missing path is the most useful case to flag).
+    await refreshCodebasePathStatus();
   } catch (err) {
     showSettingsStatus('codebase-status', String(err));
   }
