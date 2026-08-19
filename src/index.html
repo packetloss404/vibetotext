@@ -36,35 +36,37 @@
     </div>
 
     <div class="tabs" id="tabs" role="tablist" aria-label="View mode">
-      <button class="tab active" data-mode="all" role="tab" aria-selected="true">All</button>
-      <button class="tab" data-mode="transcribe" role="tab" aria-selected="false">Transcribe</button>
-      <button class="tab" data-mode="greppy" role="tab" aria-selected="false">Greppy</button>
-      <button class="tab" data-mode="cleanup" role="tab" aria-selected="false">Cleanup</button>
-      <button class="tab" data-mode="plan" role="tab" aria-selected="false">Plan</button>
-      <button class="tab" data-mode="analytics" role="tab" aria-selected="false">Analytics</button>
-      <button class="tab" data-mode="microphone" role="tab" aria-selected="false">Microphone</button>
-      <button class="tab" data-mode="dictionary" role="tab" aria-selected="false">Dictionary</button>
-      <button class="tab" data-mode="settings" role="tab" aria-selected="false">Settings</button>
+      <button class="tab active" id="tab-all" data-mode="all" role="tab" aria-selected="true" aria-controls="panel-entries" tabindex="0">All</button>
+      <button class="tab" id="tab-transcribe" data-mode="transcribe" role="tab" aria-selected="false" aria-controls="panel-entries" tabindex="-1">Transcribe</button>
+      <button class="tab" id="tab-greppy" data-mode="greppy" role="tab" aria-selected="false" aria-controls="panel-entries" tabindex="-1">Greppy</button>
+      <button class="tab" id="tab-cleanup" data-mode="cleanup" role="tab" aria-selected="false" aria-controls="panel-entries" tabindex="-1">Cleanup</button>
+      <button class="tab" id="tab-plan" data-mode="plan" role="tab" aria-selected="false" aria-controls="panel-entries" tabindex="-1">Plan</button>
+      <button class="tab" id="tab-analytics" data-mode="analytics" role="tab" aria-selected="false" aria-controls="panel-analytics" tabindex="-1">Analytics</button>
+      <button class="tab" id="tab-microphone" data-mode="microphone" role="tab" aria-selected="false" aria-controls="panel-microphone" tabindex="-1">Microphone</button>
+      <button class="tab" id="tab-dictionary" data-mode="dictionary" role="tab" aria-selected="false" aria-controls="panel-dictionary" tabindex="-1">Dictionary</button>
+      <button class="tab" id="tab-settings" data-mode="settings" role="tab" aria-selected="false" aria-controls="panel-settings" tabindex="-1">Settings</button>
     </div>
 
-    <div class="common-words" id="common-words-section">
-      <h3>Top Words</h3>
-      <div class="word-chips" id="common-words"></div>
+    <div class="entries-panel" id="panel-entries" role="tabpanel" aria-labelledby="tab-all" tabindex="0">
+      <div class="common-words" id="common-words-section">
+        <h3>Top Words</h3>
+        <div class="word-chips" id="common-words"></div>
+      </div>
+
+      <div class="entries" id="entries">
+        <!-- Entries will be populated by JavaScript -->
+      </div>
+
+      <div class="empty-state" id="empty-state" style="display: none;">
+        <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p>No transcriptions yet</p>
+        <p class="hint">ctrl+shift to record</p>
+      </div>
     </div>
 
-    <div class="entries" id="entries">
-      <!-- Entries will be populated by JavaScript -->
-    </div>
-
-    <div class="empty-state" id="empty-state" style="display: none;">
-      <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <p>No transcriptions yet</p>
-      <p class="hint">ctrl+shift to record</p>
-    </div>
-
-    <div class="microphone-panel" id="microphone-panel" style="display: none;">
+    <div class="microphone-panel" id="microphone-panel" role="tabpanel" aria-labelledby="tab-microphone" tabindex="0" hidden>
       <div class="mic-settings">
         <h3 id="mic-heading">Audio Input Device</h3>
         <p class="mic-description">Select the microphone to use for voice recording.</p>
@@ -75,7 +77,7 @@
       </div>
     </div>
 
-    <div class="dictionary-panel" id="dictionary-panel" style="display: none;">
+    <div class="dictionary-panel" id="dictionary-panel" role="tabpanel" aria-labelledby="tab-dictionary" tabindex="0" hidden>
       <div class="dict-settings">
         <h3 id="dict-heading">Custom Dictionary</h3>
         <p class="dict-description">Add words you use frequently to improve transcription accuracy. These words will be included in the Whisper prompt.</p>
@@ -91,7 +93,7 @@
       </div>
     </div>
 
-    <div class="settings-panel" id="settings-panel" style="display: none;">
+    <div class="settings-panel" id="settings-panel" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
       <div class="settings-section">
         <h3>Orb Position</h3>
         <p class="settings-description">Choose where the recording indicator appears on your screen.</p>
@@ -164,7 +166,7 @@
       </div>
     </div>
 
-    <div class="analytics-panel" id="analytics-panel" style="display: none;">
+    <div class="analytics-panel" id="analytics-panel" role="tabpanel" aria-labelledby="tab-analytics" tabindex="0" hidden>
       <div class="chart-grid">
         <!-- Streaks & Records -->
         <div class="chart-card">
@@ -193,12 +195,12 @@
           <div class="activity-header">
             <h3>Activity</h3>
             <div class="activity-tabs" role="tablist" aria-label="Activity time range">
-              <button class="activity-tab active" data-view="hourly" role="tab" aria-selected="true">Hourly</button>
-              <button class="activity-tab" data-view="yearly" role="tab" aria-selected="false">Yearly</button>
+              <button class="activity-tab active" id="activity-tab-hourly" data-view="hourly" role="tab" aria-selected="true" aria-controls="activity-panel-hourly" tabindex="0">Hourly</button>
+              <button class="activity-tab" id="activity-tab-yearly" data-view="yearly" role="tab" aria-selected="false" aria-controls="activity-panel-yearly" tabindex="-1">Yearly</button>
             </div>
           </div>
-          <div id="activity-heatmap"></div>
-          <div id="activity-yearly" style="display: none;"></div>
+          <div id="activity-heatmap" role="tabpanel" aria-labelledby="activity-tab-hourly" tabindex="0"></div>
+          <div id="activity-yearly" role="tabpanel" aria-labelledby="activity-tab-yearly" tabindex="0" hidden></div>
         </div>
         <div class="chart-card">
           <h3>Peak Hours</h3>
@@ -290,6 +292,7 @@
   <script src="lib/d3.min.js"></script>
   <script src="api.js"></script>
   <script src="analytics.js"></script>
+  <script src="tabs.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

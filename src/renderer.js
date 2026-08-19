@@ -618,95 +618,72 @@ function showSettingsStatus(elementId, message) {
   }, 4000);
 }
 
-// Tab click handlers
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', async () => {
-    // Update active state
-    document.querySelectorAll('.tab').forEach(t => {
-      t.classList.remove('active');
-      t.setAttribute('aria-selected', 'false');
-    });
-    tab.classList.add('active');
-    tab.setAttribute('aria-selected', 'true');
+// Main tab activation: render the panel for the newly-selected mode. The
+// ARIA-side state (active class, aria-selected, roving tabindex) is managed
+// by `setupTablist`; this callback only handles the panel-rendering side.
+async function activateMainTab(tab) {
+  currentMode = tab.dataset.mode;
 
-    // Update current mode
-    currentMode = tab.dataset.mode;
+  const analyticsPanel = document.getElementById('analytics-panel');
+  const microphonePanel = document.getElementById('microphone-panel');
+  const dictionaryPanel = document.getElementById('dictionary-panel');
+  const entriesPanel = document.getElementById('panel-entries');
+  const settingsPanel = document.getElementById('settings-panel');
 
-    // Handle special tabs
-    const analyticsPanel = document.getElementById('analytics-panel');
-    const microphonePanel = document.getElementById('microphone-panel');
-    const dictionaryPanel = document.getElementById('dictionary-panel');
-    const entriesContainer = document.getElementById('entries');
-    const commonWordsSection = document.getElementById('common-words-section');
-    const emptyState = document.getElementById('empty-state');
+  // Hide all panels first; show the one(s) for the selected mode. Use the
+  // `hidden` attribute so screen readers + the tab roving focus honor the
+  // ARIA tabpanel contract.
+  analyticsPanel.hidden = true;
+  microphonePanel.hidden = true;
+  dictionaryPanel.hidden = true;
+  settingsPanel.hidden = true;
 
-    const settingsPanel = document.getElementById('settings-panel');
-
-    // Hide all special panels first
-    analyticsPanel.style.display = 'none';
-    microphonePanel.style.display = 'none';
-    dictionaryPanel.style.display = 'none';
-    settingsPanel.style.display = 'none';
-
-    if (currentMode === 'analytics') {
-      // Show analytics, hide entries
-      analyticsPanel.style.display = 'block';
-      entriesContainer.style.display = 'none';
-      commonWordsSection.style.display = 'none';
-      emptyState.style.display = 'none';
-
-      // Refresh data, then update header stats (show "all" stats)
-      const entries = await loadHistory();
-      updateHeaderStats(currentMode);
-
-      // Render analytics charts
-      if (typeof renderAnalytics === 'function') {
-        renderAnalytics(entries);
-      }
-    } else if (currentMode === 'microphone') {
-      // Show microphone panel, hide entries
-      microphonePanel.style.display = 'block';
-      entriesContainer.style.display = 'none';
-      commonWordsSection.style.display = 'none';
-      emptyState.style.display = 'none';
-
-      // Update header stats (show "all" stats)
-      await loadHistory();
-      updateHeaderStats(currentMode);
-
-      // Load audio devices
-      await loadAudioDevices();
-    } else if (currentMode === 'dictionary') {
-      // Show dictionary panel, hide entries
-      dictionaryPanel.style.display = 'block';
-      entriesContainer.style.display = 'none';
-      commonWordsSection.style.display = 'none';
-      emptyState.style.display = 'none';
-
-      // Update header stats (show "all" stats)
-      await loadHistory();
-      updateHeaderStats(currentMode);
-
-      // Render dictionary words
-      await renderDictionaryWords();
-    } else if (currentMode === 'settings') {
-      // Show settings panel, hide entries
-      settingsPanel.style.display = 'block';
-      entriesContainer.style.display = 'none';
-      commonWordsSection.style.display = 'none';
-      emptyState.style.display = 'none';
-
-      // Update header stats (show "all" stats)
-      await loadHistory();
-      updateHeaderStats(currentMode);
-
-      // Render settings
-      await renderSettings();
-    } else {
-      // Hide special panels, show entries
-      await render(true);
+  if (currentMode === 'analytics') {
+    analyticsPanel.hidden = false;
+    const entries = await loadHistory();
+    updateHeaderStats(currentMode);
+    if (typeof renderAnalytics === 'function') {
+      renderAnalytics(entries);
     }
-  });
+  } else if (currentMode === 'microphone') {
+    microphonePanel.hidden = false;
+    await loadHistory();
+    updateHeaderStats(currentMode);
+    await loadAudioDevices();
+  } else if (currentMode === 'dictionary') {
+    dictionaryPanel.hidden = false;
+    await loadHistory();
+    updateHeaderStats(currentMode);
+    await renderDictionaryWords();
+  } else if (currentMode === 'settings') {
+    settingsPanel.hidden = false;
+    await loadHistory();
+    updateHeaderStats(currentMode);
+    await renderSettings();
+  } else {
+    // all / transcribe / greppy / cleanup / plan → shared entries panel
+    entriesPanel.hidden = false;
+    await render(true);
+  }
+}
+
+// Wire the main tablist to the panel-renderer. setupTablist handles
+// click + roving tabindex + ArrowLeft/Right/Home/End + automatic aria-selected.
+setupTablist({
+  tablist: document.getElementById('tabs'),
+  onActivate: (tab) => { activateMainTab(tab); },
+});
+
+// Activity (hourly / yearly) sub-tablist. Same ARIA pattern, but inside the
+// analytics card; on activation we just toggle the inner panels without
+// touching the entries list.
+setupTablist({
+  tablist: document.querySelector('.activity-tabs'),
+  onActivate: (tab) => {
+    const view = tab.dataset.view;
+    document.getElementById('activity-heatmap').hidden = view !== 'hourly';
+    document.getElementById('activity-yearly').hidden = view !== 'yearly';
+  },
 });
 
 // Set up mic dropdown change handler
