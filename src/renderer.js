@@ -631,12 +631,8 @@ document.querySelectorAll('.tab').forEach(tab => {
       updateHeaderStats(currentMode);
 
       // Render analytics charts
-      console.log('[Renderer] Analytics tab clicked, renderAnalytics available:', typeof renderAnalytics === 'function');
       if (typeof renderAnalytics === 'function') {
-        console.log('[Renderer] Loaded history with', entries.length, 'entries');
         renderAnalytics(entries);
-      } else {
-        console.error('[Renderer] renderAnalytics function not found!');
       }
     } else if (currentMode === 'microphone') {
       // Show microphone panel, hide entries
@@ -689,7 +685,7 @@ document.getElementById('mic-select').addEventListener('change', handleMicChange
 
 // Set up dictionary handlers
 document.getElementById('dict-add-btn').addEventListener('click', addDictionaryWord);
-document.getElementById('dict-input').addEventListener('keypress', (e) => {
+document.getElementById('dict-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     addDictionaryWord();
   }
