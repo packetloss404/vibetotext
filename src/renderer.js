@@ -393,7 +393,7 @@ async function renderDictionaryWords() {
   wordsContainer.innerHTML = words.map(word => `
     <span class="dict-word">
       ${escapeHtml(word)}
-      <button class="dict-word-remove" data-word="${escapeHtml(word)}">&times;</button>
+      <button class="dict-word-remove" data-word="${escapeHtml(word)}" aria-label="Remove &quot;${escapeHtml(word)}&quot;">&times;</button>
     </span>
   `).join('');
 
@@ -593,8 +593,12 @@ function showSettingsStatus(elementId, message) {
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', async () => {
     // Update active state
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
     tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
 
     // Update current mode
     currentMode = tab.dataset.mode;
