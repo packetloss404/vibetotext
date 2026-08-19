@@ -92,19 +92,19 @@ pub fn get_entries(
         .map_err(|e| e.to_string())
 }
 
-/// Aggregate statistics over all history (sessions, words, avg WPM, time saved,
+/// Aggregate statistics over history (sessions, words, avg WPM, time saved,
 /// common/longest words). Replaces the renderer's in-JS stat computation.
 ///
-/// `mode` is accepted for forward-compatibility/parity with `get_entries`; the
-/// Phase 0 `Db::get_statistics` aggregates over all rows, so a per-mode breakdown
-/// is a documented later refinement (the frontend currently requests "all").
+/// `mode` restricts every metric to that mode; `None` aggregates over all rows.
+/// Mirrors the filter semantics of `get_entries` so a per-mode analytics view
+/// is one consistent query.
 #[tauri::command]
 pub fn get_statistics(
     state: State<'_, AppState>,
-    _mode: Option<String>,
+    mode: Option<String>,
 ) -> Result<Statistics, String> {
     let db = open_db(&state)?;
-    db.get_statistics().map_err(|e| e.to_string())
+    db.get_statistics(mode.as_deref()).map_err(|e| e.to_string())
 }
 
 /// Return the current pipeline readiness/admission state so a newly-loaded

@@ -162,10 +162,13 @@ impl Db {
         entries::get_entries(&conn, mode, limit)
     }
 
-    /// Compute aggregate statistics over all history (port of `get_statistics`).
-    pub fn get_statistics(&self) -> Result<Statistics, DbError> {
+    /// Compute aggregate statistics over history (port of `get_statistics`).
+    ///
+    /// `mode = Some("transcribe")` (etc.) restricts every metric to the matching
+    /// rows; `None` aggregates over every mode. Mirrors [`get_entries`](Self::get_entries).
+    pub fn get_statistics(&self, mode: Option<&str>) -> Result<Statistics, DbError> {
         let conn = self.conn.lock().expect("db mutex poisoned");
-        stats::get_statistics(&conn)
+        stats::get_statistics(&conn, mode)
     }
 
     /// Delete all history (port of `clear`).
@@ -503,7 +506,7 @@ mod tests {
             )
             .unwrap();
 
-            let s = db.get_statistics().unwrap();
+            let s = db.get_statistics(None).unwrap();
             assert_eq!(s.total_sessions, 2);
             assert_eq!(s.total_words, 140);
             // avg of 100 and 40 = 70.
@@ -524,12 +527,59 @@ mod tests {
         cleanup(&path);
         {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
-            let s = db.get_statistics().unwrap();
+            let s = db.get_statistics(None).unwrap();
             assert_eq!(s.total_sessions, 0);
             assert_eq!(s.total_words, 0);
             assert_eq!(s.avg_wpm, 0);
             assert_eq!(s.time_saved_minutes, 0.0);
             assert!(s.common_words.is_empty());
+        }
+        cleanup(&path);
+        let _ = std::fs::remove_file(backup_path_for(&path));
+    }
+
+    /// `get_statistics(mode)` restricts every metric (counts, avg WPM, time
+    /// saved, word frequency) to the matching rows.
+    #[test]
+    fn statistics_filters_by_mode() {
+        let path = temp_db_path("statsbymode");
+        cleanup(&path);
+        {
+            let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
+            let mut conn = db.conn.lock().expect("db mutex poisoned");
+
+            // 1 transcribe entry (2 words) + 1 cleanup entry (3 words).
+            let _ = super::entries::add_entry(
+                &mut conn, stub_scorer, "alpha beta",
+                "transcribe", "2026-08-19T00:00:00Z", Some(2.0),
+            ).unwrap();
+            let _ = super::entries::add_entry(
+                &mut conn, stub_scorer, "gamma delta epsilon",
+                "cleanup", "2026-08-19T00:00:01Z", Some(3.0),
+            ).unwrap();
+            drop(conn);
+
+            let s_all = db.get_statistics(None).unwrap();
+            assert_eq!(s_all.total_sessions, 2);
+            assert_eq!(s_all.total_words, 5);
+
+            let s_t = db.get_statistics(Some("transcribe")).unwrap();
+            assert_eq!(s_t.total_sessions, 1);
+            assert_eq!(s_t.total_words, 2);
+            // Word frequency only sees transcribe text -> "alpha", "beta".
+            let t_map: std::collections::HashMap<_, _> =
+                s_t.common_words.iter().cloned().collect();
+            assert_eq!(t_map.get("alpha"), Some(&1));
+            assert_eq!(t_map.get("beta"), Some(&1));
+            assert!(!t_map.contains_key("gamma"));
+
+            let s_c = db.get_statistics(Some("cleanup")).unwrap();
+            assert_eq!(s_c.total_sessions, 1);
+            assert_eq!(s_c.total_words, 3);
+            let c_map: std::collections::HashMap<_, _> =
+                s_c.common_words.iter().cloned().collect();
+            assert_eq!(c_map.get("gamma"), Some(&1));
+            assert!(!c_map.contains_key("alpha"));
         }
         cleanup(&path);
         let _ = std::fs::remove_file(backup_path_for(&path));

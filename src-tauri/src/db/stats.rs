@@ -45,46 +45,87 @@ impl Statistics {
     }
 }
 
-/// Compute statistics over all history.
-pub(super) fn get_statistics(conn: &Connection) -> Result<Statistics, DbError> {
+/// Compute statistics over all history, optionally filtered by `mode`.
+///
+/// `mode = Some("transcribe")` (etc.) restricts the aggregate counts, avg WPM,
+/// time-saved calculation, and the word-frequency text source to the matching
+/// rows. `None` aggregates over every mode. The `entries.mode` index added by
+/// the `get_entries` fix keeps the filtered aggregate cheap.
+pub(super) fn get_statistics(conn: &Connection, mode: Option<&str>) -> Result<Statistics, DbError> {
     // Aggregate counts.
-    let (total_sessions, total_words, total_duration): (i64, i64, f64) = conn.query_row(
-        "SELECT
-            COUNT(*),
-            COALESCE(SUM(word_count), 0),
-            COALESCE(SUM(duration_seconds), 0)
-         FROM entries",
-        [],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    )?;
+    let (total_sessions, total_words, total_duration): (i64, i64, f64) = if let Some(m) = mode {
+        conn.query_row(
+            "SELECT
+                COUNT(*),
+                COALESCE(SUM(word_count), 0),
+                COALESCE(SUM(duration_seconds), 0)
+             FROM entries WHERE mode = ?1",
+            [m],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT
+                COUNT(*),
+                COALESCE(SUM(word_count), 0),
+                COALESCE(SUM(duration_seconds), 0)
+             FROM entries",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?
+    };
 
     if total_sessions == 0 {
         return Ok(Statistics::empty());
     }
 
     // Average WPM over rows that have one. AVG() returns NULL when none qualify.
-    let avg_wpm_raw: Option<f64> = conn.query_row(
-        "SELECT AVG(wpm) FROM entries WHERE wpm IS NOT NULL",
-        [],
-        |r| r.get(0),
-    )?;
+    let avg_wpm_raw: Option<f64> = if let Some(m) = mode {
+        conn.query_row(
+            "SELECT AVG(wpm) FROM entries WHERE wpm IS NOT NULL AND mode = ?1",
+            [m],
+            |r| r.get(0),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT AVG(wpm) FROM entries WHERE wpm IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )?
+    };
     let avg_wpm = avg_wpm_raw.map(|v| v.round() as i64).unwrap_or(0);
 
     // Time saved: words-with-duration / 40wpm  minus  total dictation minutes.
-    let words_with_duration: i64 = conn.query_row(
-        "SELECT COALESCE(SUM(word_count), 0) FROM entries WHERE duration_seconds IS NOT NULL",
-        [],
-        |r| r.get(0),
-    )?;
+    let words_with_duration: i64 = if let Some(m) = mode {
+        conn.query_row(
+            "SELECT COALESCE(SUM(word_count), 0) FROM entries
+             WHERE duration_seconds IS NOT NULL AND mode = ?1",
+            [m],
+            |r| r.get(0),
+        )?
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(SUM(word_count), 0) FROM entries WHERE duration_seconds IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )?
+    };
     let time_to_type_minutes = words_with_duration as f64 / TYPING_WPM;
     let time_dictating_minutes = total_duration / 60.0;
     let time_saved_minutes = (time_to_type_minutes - time_dictating_minutes).max(0.0);
 
-    // Word-frequency analysis over all text.
-    let texts: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT text FROM entries")?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-        rows.collect::<Result<_, _>>()?
+    // Word-frequency analysis over filtered text.
+    let texts: Vec<String> = match mode {
+        Some(m) => {
+            let mut stmt = conn.prepare("SELECT text FROM entries WHERE mode = ?1")?;
+            let rows = stmt.query_map([m], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<_, _>>()?
+        }
+        None => {
+            let mut stmt = conn.prepare("SELECT text FROM entries")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<Result<_, _>>()?
+        }
     };
 
     let (common_words, longest_words) = word_frequency(&texts);
