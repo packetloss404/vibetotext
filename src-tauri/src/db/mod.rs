@@ -150,10 +150,16 @@ impl Db {
         )
     }
 
-    /// Fetch entries newest-first, optionally capped at `limit`.
-    pub fn get_entries(&self, limit: Option<u32>) -> Result<Vec<Entry>, DbError> {
+    /// Fetch entries newest-first, optionally filtered by `mode` and capped at
+    /// `limit`. The `mode` filter is applied in SQL so `limit` bounds the
+    /// number of *filtered* rows.
+    pub fn get_entries(
+        &self,
+        mode: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<Entry>, DbError> {
         let conn = self.conn.lock().expect("db mutex poisoned");
-        entries::get_entries(&conn, limit)
+        entries::get_entries(&conn, mode, limit)
     }
 
     /// Compute aggregate statistics over all history (port of `get_statistics`).
@@ -223,7 +229,7 @@ mod tests {
                 .unwrap();
             assert!(id > 0);
 
-            let entries = db.get_entries(None).unwrap();
+            let entries = db.get_entries(None, None).unwrap();
             assert_eq!(entries.len(), 1);
             let e = &entries[0];
             assert_eq!(e.text, "this is a really good transcription");
@@ -245,7 +251,7 @@ mod tests {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
             db.add_entry("plain text here", "cleanup", "2026-06-02T11:00:00", None)
                 .unwrap();
-            let e = &db.get_entries(None).unwrap()[0];
+            let e = &db.get_entries(None, None).unwrap()[0];
             assert_eq!(e.duration_seconds, None);
             assert_eq!(e.wpm, None);
             assert_eq!(e.word_count, 3);
@@ -253,7 +259,7 @@ mod tests {
         cleanup(&path);
     }
 
-    /// Newest-first ordering and the `limit` cap.
+    /// Newest-first ordering, the `limit` cap, and the `mode` filter.
     #[test]
     fn ordering_and_limit() {
         let path = temp_db_path("order");
@@ -266,14 +272,57 @@ mod tests {
             db.add_entry("third", "transcribe", "2026-06-03T09:00:00", None)
                 .unwrap();
 
-            let all = db.get_entries(None).unwrap();
+            let all = db.get_entries(None, None).unwrap();
             assert_eq!(all.len(), 3);
             assert_eq!(all[0].text, "third"); // newest first
             assert_eq!(all[2].text, "first");
 
-            let limited = db.get_entries(Some(2)).unwrap();
+            let limited = db.get_entries(None, Some(2)).unwrap();
             assert_eq!(limited.len(), 2);
             assert_eq!(limited[0].text, "third");
+        }
+        cleanup(&path);
+    }
+
+    /// `mode` and `limit` compose: filtering happens in SQL so `limit` bounds
+    /// the *filtered* rows, not the unfiltered ones. Regression for the
+    /// frontend asking "10 most recent cleanup entries" and getting fewer than
+    /// 10 because the most recent rows were other modes.
+    #[test]
+    fn filter_mode_is_applied_before_limit() {
+        let path = temp_db_path("mode_limit");
+        {
+            let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
+            // Interleave cleanup and transcribe; the cleanup rows are the 1st,
+            // 3rd, 5th newest — so a "limit 2 cleanup" should skip past the
+            // interleaved transcribe rows and return the 3rd and 5th newest.
+            db.add_entry("cleanup-newest", "cleanup", "2026-06-05T10:00:00", None)
+                .unwrap();
+            db.add_entry("transcribe-mid-1", "transcribe", "2026-06-04T10:00:00", None)
+                .unwrap();
+            db.add_entry("cleanup-mid-2", "cleanup", "2026-06-03T10:00:00", None)
+                .unwrap();
+            db.add_entry("transcribe-mid-2", "transcribe", "2026-06-02T10:00:00", None)
+                .unwrap();
+            db.add_entry("cleanup-oldest", "cleanup", "2026-06-01T10:00:00", None)
+                .unwrap();
+
+            let top2_cleanup = db.get_entries(Some("cleanup"), Some(2)).unwrap();
+            assert_eq!(top2_cleanup.len(), 2, "should return 2 cleanup rows");
+            assert_eq!(top2_cleanup[0].text, "cleanup-newest");
+            assert_eq!(top2_cleanup[1].text, "cleanup-mid-2");
+
+            // No mode filter: same limit returns newest-of-any-mode.
+            let top2_any = db.get_entries(None, Some(2)).unwrap();
+            assert_eq!(top2_any[0].text, "cleanup-newest");
+            assert_eq!(top2_any[1].text, "transcribe-mid-1");
+
+            // Mode filter without limit: all matching rows in newest-first order.
+            let all_cleanup = db.get_entries(Some("cleanup"), None).unwrap();
+            assert_eq!(all_cleanup.len(), 3);
+            assert_eq!(all_cleanup[0].text, "cleanup-newest");
+            assert_eq!(all_cleanup[1].text, "cleanup-mid-2");
+            assert_eq!(all_cleanup[2].text, "cleanup-oldest");
         }
         cleanup(&path);
     }
@@ -327,7 +376,7 @@ mod tests {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
 
             // Column now exists and the legacy row was backfilled.
-            let entries = db.get_entries(None).unwrap();
+            let entries = db.get_entries(None, None).unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0].sentiment,
@@ -370,7 +419,7 @@ mod tests {
         // Second open should succeed and preserve data.
         {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
-            assert_eq!(db.get_entries(None).unwrap().len(), 1);
+            assert_eq!(db.get_entries(None, None).unwrap().len(), 1);
         }
         cleanup(&path);
         let _ = std::fs::remove_file(backup_path_for(&path));
@@ -398,7 +447,7 @@ mod tests {
 
         {
             let db = Db::open_with_scorer(&path, stub_scorer).unwrap();
-            let entries = db.get_entries(None).unwrap();
+            let entries = db.get_entries(None, None).unwrap();
             assert_eq!(entries.len(), 2);
             // Newest first.
             assert_eq!(entries[0].text, "second bad one");

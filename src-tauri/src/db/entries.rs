@@ -91,23 +91,46 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     })
 }
 
-/// Fetch entries newest-first, optionally capped at `limit`.
-/// Port of `get_entries`.
-pub(super) fn get_entries(conn: &Connection, limit: Option<u32>) -> Result<Vec<Entry>, DbError> {
-    let entries = match limit {
-        Some(n) => {
-            let mut stmt =
-                conn.prepare("SELECT * FROM entries ORDER BY timestamp DESC LIMIT ?1")?;
-            let rows = stmt.query_map(params![n], row_to_entry)?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        }
-        None => {
-            let mut stmt = conn.prepare("SELECT * FROM entries ORDER BY timestamp DESC")?;
-            let rows = stmt.query_map([], row_to_entry)?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        }
-    };
-    Ok(entries)
+/// Fetch entries newest-first, optionally filtered by `mode` and capped at `limit`.
+/// Port of `get_entries`. The `mode` filter is applied in SQL so `limit` bounds
+/// the number of *filtered* rows (not "limit then filter", which can return
+/// fewer than `limit` rows when the most recent entries are in other modes).
+pub(super) fn get_entries(
+    conn: &Connection,
+    mode: Option<&str>,
+    limit: Option<u32>,
+) -> Result<Vec<Entry>, DbError> {
+    // Bound parameters in the same order they appear in the query.
+    enum Param<'a> {
+        Str(&'a str),
+        Uint(u32),
+    }
+
+    let mut sql = String::from("SELECT * FROM entries");
+    let mut where_clause = String::new();
+    let mut params: Vec<Param<'_>> = Vec::new();
+    if let Some(m) = mode {
+        where_clause.push_str(" WHERE mode = ?");
+        params.push(Param::Str(m));
+    }
+    sql.push_str(&where_clause);
+    sql.push_str(" ORDER BY timestamp DESC");
+    if let Some(n) = limit {
+        // +1 lets us reserve a binding slot so the same SQL works without a
+        // separate prepare branch.
+        sql.push_str(" LIMIT ?");
+        params.push(Param::Uint(n));
+    }
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(params.iter().map(|p| match p {
+            Param::Str(s) => s as &dyn rusqlite::ToSql,
+            Param::Uint(n) => n as &dyn rusqlite::ToSql,
+        })),
+        row_to_entry,
+    )?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// Total row count — small helper used by callers/tests.

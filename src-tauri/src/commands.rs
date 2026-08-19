@@ -73,7 +73,10 @@ fn save_cfg(cfg: &AppConfig) -> Result<(), String> {
 ///
 /// Replaces the renderer's direct `SELECT * FROM entries ORDER BY timestamp DESC`.
 /// `mode` filters by transcription mode (`transcribe`/`cleanup`/`plan`/`greppy`);
-/// `None` or `"all"` returns every mode. `limit` caps the row count.
+/// `None` or `"all"` returns every mode. `limit` caps the row count of the
+/// *filtered* set (the filter is applied in SQL so a request for the 10 most
+/// recent "cleanup" entries really returns up to 10, not "up to 10 of any mode
+/// then filtered").
 #[tauri::command]
 pub fn get_entries(
     state: State<'_, AppState>,
@@ -81,13 +84,11 @@ pub fn get_entries(
     limit: Option<u32>,
 ) -> Result<Vec<Entry>, String> {
     let db = open_db(&state)?;
-    let entries = db.get_entries(limit).map_err(|e| e.to_string())?;
-
-    let entries = match mode.as_deref() {
-        None | Some("all") | Some("") => entries,
-        Some(m) => entries.into_iter().filter(|e| e.mode == m).collect(),
+    let mode_filter = match mode.as_deref() {
+        None | Some("all") | Some("") => None,
+        Some(m) => Some(m),
     };
-    Ok(entries)
+    db.get_entries(mode_filter, limit).map_err(|e| e.to_string())
 }
 
 /// Aggregate statistics over all history (sessions, words, avg WPM, time saved,
@@ -97,11 +98,11 @@ pub fn get_entries(
 /// Phase 0 `Db::get_statistics` aggregates over all rows, so a per-mode breakdown
 /// is a documented later refinement (the frontend currently requests "all").
 #[tauri::command]
+#[allow(unused_variables)]
 pub fn get_statistics(
     state: State<'_, AppState>,
     mode: Option<String>,
 ) -> Result<Statistics, String> {
-    let _ = mode; // see doc comment: all-mode aggregate for now.
     let db = open_db(&state)?;
     db.get_statistics().map_err(|e| e.to_string())
 }
