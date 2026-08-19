@@ -16,8 +16,16 @@
 //! resampled mono f32 into a shared `Arc<Mutex<Vec<f32>>>` (the full 16 kHz
 //! buffer) and, when enough fresh samples have accumulated, computes the 25-bar
 //! waveform and calls the user `on_level` callback. As in the Python callback,
-//! the audio thread does no blocking I/O. `stop()` drops the stream (which joins
-//! the callback) and returns the accumulated buffer.
+//! the audio thread does no blocking I/O.
+//!
+//! ## RAII guard
+//! `Recorder::start` returns a [`RecordingGuard`] that owns the live
+//! `cpal::Stream` and the buffer. Dropping the guard stops the stream
+//! (joining the callback thread) and discards any unclaimed audio. A panic
+//! in the pipeline mid-recording therefore releases the OS audio handle
+//! instead of leaking it. The normal path is
+//! `guard.into_buffer()` which consumes the guard and returns the captured
+//! 16 kHz mono f32 samples.
 //!
 //! ## Device index semantics (risk #5)
 //! `start(device_index, …)` selects by **host input-device index** — the position
@@ -49,38 +57,104 @@ const NUM_BARS: usize = 25;
 /// Matches `recorder.py`'s `FFT_SIZE = 512` so band-mapping/smoothing line up.
 const WAVEFORM_WINDOW: usize = 512;
 
-/// Records audio from the microphone into a 16 kHz mono f32 buffer.
+/// Owns the cpal `Stream` + the shared audio buffer for one recording session.
 ///
-/// Construct with [`Recorder::new`], then [`start`](Recorder::start) /
-/// [`stop`](Recorder::stop). A `Recorder` holds at most one active stream at a
-/// time; calling `start` while already recording returns an error.
-pub struct Recorder {
-    /// Live capture session, present only while recording.
+/// Returned by [`Recorder::start`]. The pipeline stores the guard in its state
+/// while recording; on a clean stop it calls [`into_buffer`](Self::into_buffer)
+/// to consume the guard and retrieve the audio. If the guard is dropped without
+/// `into_buffer` (e.g. on a panic), the `Drop` impl stops the cpal stream
+/// (joining the callback thread) and logs a warning so we don't lose track of
+/// a forgotten recording session.
+pub struct RecordingGuard {
+    /// Live capture session; present until `into_buffer` consumes the guard.
     session: Option<Session>,
 }
 
 /// One active recording session: the cpal stream plus the shared buffer it fills.
 struct Session {
     /// The cpal input stream. Dropping it stops capture and joins the callback.
-    /// `Stream` is `!Send` on some backends, so the whole `Recorder` is used from
-    /// one thread; the *data* it produces is shared via `Arc<Mutex<…>>`.
+    /// `Stream` is `!Send` on some backends, so the whole `RecordingGuard` is
+    /// used from one thread; the *data* it produces is shared via `Arc<Mutex<…>>`.
     stream: Stream,
     /// Full captured audio, already resampled to 16 kHz mono f32.
     buffer: Arc<Mutex<Vec<f32>>>,
 }
 
+impl RecordingGuard {
+    /// Stop the stream and return the captured 16 kHz mono f32 samples.
+    ///
+    /// Consumes the guard; calling it again is a type error. The cpal stream
+    /// is dropped (joining the callback thread) so no callback can mutate the
+    /// buffer after this point.
+    pub fn into_buffer(mut self) -> Result<Vec<f32>> {
+        let session = match self.session.take() {
+            Some(s) => s,
+            None => {
+                // into_buffer can only be called once because the Option is
+                // taken; the only path here is "impossible" (called after a
+                // previous into_buffer), but stay loud rather than panic.
+                anyhow::bail!("recording guard already consumed");
+            }
+        };
+
+        // Dropping the stream stops capture and joins the callback thread, so no
+        // callback can be mutating the buffer after this point.
+        drop(session.stream);
+
+        let audio = match Arc::try_unwrap(session.buffer) {
+            Ok(mutex) => mutex
+                .into_inner()
+                .map_err(|_| anyhow!("audio buffer mutex poisoned"))?,
+            // Should not happen (stream dropped → sole owner), but stay safe.
+            Err(arc) => arc
+                .lock()
+                .map_err(|_| anyhow!("audio buffer mutex poisoned"))?
+                .clone(),
+        };
+
+        let duration = audio.len() as f32 / TARGET_SAMPLE_RATE as f32;
+        tracing::info!(
+            samples = audio.len(),
+            duration_s = duration,
+            "stopped audio capture"
+        );
+
+        Ok(audio)
+    }
+}
+
+impl Drop for RecordingGuard {
+    fn drop(&mut self) {
+        if self.session.is_some() {
+            // The guard went out of scope without `into_buffer` being called.
+            // That means the pipeline abandoned a recording (panic, early
+            // return, etc.). Drop the stream now (joining the callback) and
+            // warn so we notice if this becomes a regular pattern.
+            tracing::warn!(
+                "RecordingGuard dropped without into_buffer(); \
+                 cpal stream released via Drop"
+            );
+            // Explicitly take to ensure the drop order is deterministic.
+            self.session.take();
+        }
+    }
+}
+
+/// Microphone recorder. Stateless; the live `cpal::Stream` lives in a
+/// [`RecordingGuard`] returned from [`start`](Recorder::start). The recorder
+/// itself can be re-used to start successive sessions.
+pub struct Recorder {
+    _private: (),
+}
+
 impl Recorder {
-    /// Create an idle recorder.
+    /// Create a new recorder. Stateless; safe to construct ad-hoc.
     pub fn new() -> Recorder {
-        Recorder { session: None }
+        Recorder { _private: () }
     }
 
-    /// Returns `true` while a capture stream is active.
-    pub fn is_recording(&self) -> bool {
-        self.session.is_some()
-    }
-
-    /// Begin capturing from the selected input device.
+    /// Begin capturing from the selected input device and return a guard
+    /// owning the live `cpal::Stream` and audio buffer.
     ///
     /// * `device_index` — host input-device index (see module docs). `None` or an
     ///   out-of-range value selects the system default input.
@@ -89,20 +163,18 @@ impl Recorder {
     ///   emitting the `waveform-levels[25]` event.
     ///
     /// The captured audio is resampled to 16 kHz mono f32 and accumulated; call
-    /// [`stop`](Recorder::stop) to retrieve it.
+    /// [`RecordingGuard::into_buffer`] to consume the guard and retrieve the
+    /// audio. Dropping the guard without `into_buffer` (e.g. on a panic)
+    /// releases the cpal stream; a `tracing::warn!` is emitted so we notice.
     pub fn start<F>(
-        &mut self,
+        &self,
         device_index: Option<i64>,
         device_name: Option<&str>,
         on_level: F,
-    ) -> Result<()>
+    ) -> Result<RecordingGuard>
     where
         F: Fn([f32; NUM_BARS]) + Send + 'static,
     {
-        if self.session.is_some() {
-            return Err(anyhow!("recorder is already recording"));
-        }
-
         let host = cpal::default_host();
         let reconciled_index =
             crate::audio::devices::resolve_input_device_index(device_index, device_name);
@@ -153,47 +225,9 @@ impl Recorder {
         let stream = build_stream(&device, &stream_config, sample_format, cb_state)?;
         stream.play().context("starting cpal stream")?;
 
-        self.session = Some(Session { stream, buffer });
-        Ok(())
-    }
-
-    /// Stop recording and return the full 16 kHz mono f32 buffer.
-    ///
-    /// Returns an empty `Vec` (not an error) if called while not recording or if
-    /// no audio was captured — mirroring `recorder.py`'s `stop()` returning an
-    /// empty array.
-    pub fn stop(&mut self) -> Result<Vec<f32>> {
-        let session = match self.session.take() {
-            Some(s) => s,
-            None => {
-                tracing::debug!("stop() called with no active recording");
-                return Ok(Vec::new());
-            }
-        };
-
-        // Dropping the stream stops capture and joins the callback thread, so no
-        // callback can be mutating the buffer after this point.
-        drop(session.stream);
-
-        let audio = match Arc::try_unwrap(session.buffer) {
-            Ok(mutex) => mutex
-                .into_inner()
-                .map_err(|_| anyhow!("audio buffer mutex poisoned"))?,
-            // Should not happen (stream dropped → sole owner), but stay safe.
-            Err(arc) => arc
-                .lock()
-                .map_err(|_| anyhow!("audio buffer mutex poisoned"))?
-                .clone(),
-        };
-
-        let duration = audio.len() as f32 / TARGET_SAMPLE_RATE as f32;
-        tracing::info!(
-            samples = audio.len(),
-            duration_s = duration,
-            "stopped audio capture"
-        );
-
-        Ok(audio)
+        Ok(RecordingGuard {
+            session: Some(Session { stream, buffer }),
+        })
     }
 }
 

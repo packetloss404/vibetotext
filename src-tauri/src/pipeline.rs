@@ -212,7 +212,10 @@ pub fn start(app: &tauri::AppHandle) -> Result<()> {
 struct Worker {
     app: tauri::AppHandle,
     db_path: std::path::PathBuf,
-    recorder: Recorder,
+    /// Live cpal recording session. `Some` while a recording is in flight;
+    /// `None` in IDLE / PROCESSING. The `RecordingGuard` RAII-owns the cpal
+    /// stream, so a panic during recording releases the audio handle via Drop.
+    recording: Option<crate::audio::recorder::RecordingGuard>,
     /// `Some(mode)` while a recording is active (RECORDING state). `None` is IDLE.
     /// During PROCESSING this is `None` (the recording has been stopped).
     active: Option<Active>,
@@ -235,7 +238,7 @@ impl Worker {
         Self {
             app,
             db_path,
-            recorder: Recorder::new(),
+            recording: None,
             active: None,
             phase,
         }
@@ -266,8 +269,9 @@ impl Worker {
                         tracing::error!(?mode, error = %format!("{e:#}"), "pipeline Stop failed (utterance aborted)");
                         emit_pipeline_status(&self.app, "failed", Some(mode));
                         // Failure aborts THIS utterance only: clean up UI, drop
-                        // any partial recording, and keep the worker running.
-                        let _ = self.recorder.stop();
+                        // any partial recording (the guard's Drop releases the
+                        // cpal stream), and keep the worker running.
+                        self.recording = None;
                         self.abort_recording_ui();
                     }
                     // Whether Stop succeeded or failed, we are back to IDLE.
@@ -295,11 +299,12 @@ impl Worker {
             return Ok(());
         }
 
-        // Defensive: if a previous recording somehow wasn't stopped, drop it so
-        // recorder.start() doesn't error on an already-active session.
-        if self.recorder.is_recording() {
-            tracing::warn!("recorder still active on Start; dropping stale recording");
-            let _ = self.recorder.stop();
+        // Defensive: if a previous recording somehow wasn't stopped, drop the
+        // stale guard so the next start() call doesn't error. The guard's Drop
+        // releases the cpal stream.
+        if self.recording.is_some() {
+            tracing::warn!("recording guard still present on Start; dropping stale guard");
+            self.recording = None;
         }
 
         tracing::info!(?mode, "recording start");
@@ -309,7 +314,7 @@ impl Worker {
         // The waveform callback runs on cpal's audio thread; it must not block.
         // It only forwards the 25 bars to the frontend overlay via an event.
         let app_for_levels = self.app.clone();
-        self.recorder
+        let guard = Recorder::new()
             .start(
                 config.audio_device_index,
                 config.audio_device_name.as_deref(),
@@ -318,6 +323,7 @@ impl Worker {
                 },
             )
             .context("starting audio recorder")?;
+        self.recording = Some(guard);
 
         self.active = Some(Active { mode, config });
         Ok(())
@@ -345,7 +351,15 @@ impl Worker {
         };
 
         // PROCESSING: stop capture, tear down the recording UI.
-        let samples = self.recorder.stop().context("stopping audio recorder")?;
+        // Take the recording guard (consumed by `into_buffer`); the cpal
+        // stream is dropped here, joining the audio callback thread.
+        let samples = match self.recording.take() {
+            Some(guard) => guard.into_buffer().context("stopping audio recorder")?,
+            None => {
+                tracing::warn!(?mode, "Stop with no recording guard; nothing to transcribe");
+                return Ok(());
+            }
+        };
         let duration_seconds = samples.len() as f64 / 16_000.0;
         overlay::hide(&self.app).context("hiding overlay")?;
         emit_recording_state(&self.app, false, None);

@@ -345,7 +345,7 @@ pub fn get_codebase_path_status() -> Result<CodebasePathStatus, String> {
             let exists = md.is_ok();
             let readable = md
                 .as_ref()
-                .map(|m| m.permissions().readonly() == false)
+                .map(|m| !m.permissions().readonly())
                 .unwrap_or(false);
             (exists, readable)
         }
