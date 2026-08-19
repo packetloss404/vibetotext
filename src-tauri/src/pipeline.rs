@@ -53,7 +53,7 @@ use crate::db::Db;
 use crate::hotkey::{self, HotkeyEvent, Mode};
 use crate::state::{PIPELINE_IDLE, PIPELINE_PREPARING, PIPELINE_PROCESSING, PIPELINE_RECORDING};
 use crate::transcribe::Transcriber;
-use crate::{events, greppy, llm, models, overlay, paste};
+use crate::{events, greppy, llm, overlay, paste};
 
 /// Payload for the `recording-state` event (plan §5: `{recording, mode}`).
 /// `Clone` is required by Tauri's `Emitter::emit<S: Serialize + Clone>`.
@@ -204,19 +204,15 @@ pub fn start(app: &tauri::AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// The worker actor: owns the `!Send` recorder, a lazily-loaded transcriber, the
-/// state machine, and the per-utterance processing. Lives on exactly one thread.
+/// The worker actor: owns the `!Send` recorder, the state machine, and the
+/// per-utterance processing. Lives on exactly one thread. The whisper
+/// transcriber is **shared** via `AppState` (see [`AppState::ensure_transcriber`])
+/// so the `local-api` endpoint and the capture pipeline never load the same
+/// ggml model into memory twice.
 struct Worker {
     app: tauri::AppHandle,
     db_path: std::path::PathBuf,
     recorder: Recorder,
-    /// Lazily created on first transcription (mirrors `cli.py` preloading vs. our
-    /// download-on-first-run model resolution). Keyed implicitly by the model the
-    /// config requested; we recreate it if the requested model changes.
-    transcriber: Option<Transcriber>,
-    /// The model name the current `transcriber` was built for, so we can detect a
-    /// hot-applied model change and rebuild.
-    transcriber_model: Option<String>,
     /// `Some(mode)` while a recording is active (RECORDING state). `None` is IDLE.
     /// During PROCESSING this is `None` (the recording has been stopped).
     active: Option<Active>,
@@ -240,8 +236,6 @@ impl Worker {
             app,
             db_path,
             recorder: Recorder::new(),
-            transcriber: None,
-            transcriber_model: None,
             active: None,
             phase,
         }
@@ -366,14 +360,10 @@ impl Worker {
         // phase so the UI doesn't look frozen. Startup prewarm usually makes this
         // instant (the model is already resolved by the time the user records).
         emit_pipeline_status(&self.app, "preparing_model", Some(mode));
-        // Build/resolve the transcriber, then drop the &mut borrow before emitting
-        // (which needs &self.app) and re-borrow it immutably for the transcription.
-        self.ensure_transcriber(&config.whisper_model)?;
+        // Resolve via shared `AppState` so the same `Arc<Transcriber>` is reused
+        // by the `local-api` endpoint.
+        let transcriber = self.ensure_transcriber(&config.whisper_model)?;
         emit_pipeline_status(&self.app, "transcribing", Some(mode));
-        let transcriber = self
-            .transcriber
-            .as_ref()
-            .expect("transcriber ensured above");
         // `transcribe` already strips whisper artifacts/noise markers, so `raw`
         // is the cleaned transcription.
         let raw = transcriber
@@ -506,26 +496,15 @@ impl Worker {
         }
     }
 
-    /// Lazily create (or rebuild on model change) the whisper transcriber,
-    /// resolving/downloading the ggml model on first use.
-    fn ensure_transcriber(&mut self, model: &str) -> Result<&Transcriber> {
-        let needs_rebuild =
-            self.transcriber.is_none() || self.transcriber_model.as_deref() != Some(model);
-
-        if needs_rebuild {
-            tracing::info!(model, "resolving whisper model (download-on-first-run)");
-            let model_path = models::resolve_or_download(model)
-                .with_context(|| format!("resolving whisper model '{model}'"))?;
-            let transcriber = Transcriber::new(&model_path)
-                .with_context(|| format!("creating transcriber for model '{model}'"))?;
-            self.transcriber = Some(transcriber);
-            self.transcriber_model = Some(model.to_string());
-        }
-
-        Ok(self
-            .transcriber
-            .as_ref()
-            .expect("transcriber created above"))
+    /// Lazily create (or rebuild on model change) the shared whisper
+    /// transcriber, resolving/downloading the ggml model on first use.
+    ///
+    /// Delegates to [`AppState::ensure_transcriber`] so the same `Arc<Transcriber>`
+    /// is reused by the `local-api` endpoint and any future consumer.
+    fn ensure_transcriber(&self, model: &str) -> Result<Arc<Transcriber>> {
+        self.app
+            .state::<crate::state::AppState>()
+            .ensure_transcriber(model)
     }
 
     /// Best-effort startup warm-up: resolve/download + load the configured model
@@ -540,31 +519,31 @@ impl Worker {
             model,
             "prewarming whisper model (background, pre-first-use)"
         );
-        if let Err(e) = self.ensure_transcriber(&model) {
-            tracing::warn!(
-                error = %format!("{e:#}"),
-                "model resolve failed during prewarm; will retry on first use"
-            );
-            return false;
-        }
+        let transcriber = match self.ensure_transcriber(&model) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(
+                    error = %format!("{e:#}"),
+                    "model resolve failed during prewarm; will retry on first use"
+                );
+                return false;
+            }
+        };
         // Force the heavy WhisperContext load now (ensure_transcriber only builds
         // the handle; the context loads lazily) so the first hotkey is instant.
-        if let Some(t) = self.transcriber.as_ref() {
-            return match t.warm() {
-                Ok(()) => {
-                    tracing::info!("whisper model loaded and ready");
-                    true
-                }
-                Err(e) => {
-                    tracing::warn!(
+        match transcriber.warm() {
+            Ok(()) => {
+                tracing::info!("whisper model loaded and ready");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
                     error = %format!("{e:#}"),
                     "model load failed during prewarm; will retry on first use"
-                    );
-                    false
-                }
-            };
+                );
+                false
+            }
         }
-        false
     }
 
     /// Write a history entry (mode lowercased, with computed sentiment/wpm done

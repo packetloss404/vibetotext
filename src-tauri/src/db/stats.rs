@@ -167,7 +167,7 @@ fn word_frequency(texts: &[String]) -> (Vec<(String, i64)>, Vec<String>) {
     for text in texts {
         for raw in text.to_lowercase().split_whitespace() {
             let word: String = raw.trim_matches(STRIP_CHARS).to_string();
-            if word.is_empty() || word.chars().count() <= 2 || STOPWORDS.contains(&word.as_str()) {
+            if word.is_empty() || word.chars().count() <= 2 || STOPWORDS.contains(word.as_str()) {
                 continue;
             }
             let entry = counts.entry(word.clone()).or_insert_with(|| {

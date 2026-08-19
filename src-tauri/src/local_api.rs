@@ -25,12 +25,12 @@
 //! like the Python `np.frombuffer(b64decode(audio_b64), dtype=np.float32)` path.
 //!
 //! ## Model
-//! This endpoint loads its **own** [`Transcriber`] from
-//! [`models::resolve_or_download`] using the configured `whisper_model`. Sharing
-//! the running pipeline's already-loaded in-memory model via an `Arc` is a later
-//! optimization (it would avoid a second model load / RAM copy); for now the
-//! endpoint is self-contained so it works even if the capture pipeline failed to
-//! start.
+//! The endpoint borrows the **shared** [`Transcriber`] from
+//! [`crate::state::AppState`], so the same in-memory model instance serves the
+//! capture pipeline and the HTTP endpoint. The first request triggers the
+//! model download + load (multi-second cost); subsequent requests are
+//! refcount-bump fast. The endpoint returns `503 Service Unavailable` if the
+//! model has not finished loading — clients can retry.
 #![cfg(feature = "local-api")]
 
 use std::io::Read;
@@ -38,9 +38,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 use crate::config::AppConfig;
-use crate::models;
+use crate::state::AppState;
 use crate::transcribe::Transcriber;
 
 /// Loopback-only bind address. Never expose this service on a non-loopback interface.
@@ -85,10 +86,11 @@ struct ErrorResponse {
 /// failure (e.g. port already in use) is returned to the caller, which logs it
 /// without aborting app startup.
 ///
-/// `_app` is accepted for symmetry with the other `start(app)` entry points and
-/// so a future revision can pull live state (shared model, config watcher) off
-/// the [`tauri::AppHandle`] without a signature change.
-pub fn start(_app: &tauri::AppHandle) -> Result<()> {
+/// The endpoint shares the capture pipeline's whisper `Transcriber` via
+/// [`AppState`], so the same in-memory model instance serves both. If the model
+/// has not finished loading (download + first-use load), requests get
+/// `503 Service Unavailable` until it is.
+pub fn start(app: &tauri::AppHandle) -> Result<()> {
     let token = std::env::var("VIBETOTEXT_LOCAL_API_TOKEN")
         .ok()
         .map(|token| token.trim().to_string())
@@ -99,9 +101,9 @@ pub fn start(_app: &tauri::AppHandle) -> Result<()> {
     let server = tiny_http::Server::http(BIND_ADDR)
         .map_err(|e| anyhow::anyhow!("failed to bind local API to {BIND_ADDR}: {e}"))?;
 
-    // Resolve the configured model once, up front, so the (potentially slow,
-    // first-run download) happens lazily inside the Transcriber but the model
-    // *name* is read at startup. A config read failure falls back to the
+    // Resolve the configured model name once, up front, so the (potentially
+    // slow, first-run download) happens lazily inside the Transcriber but the
+    // model *name* is read at startup. A config read failure falls back to the
     // default model rather than disabling the endpoint.
     let model_name = AppConfig::load()
         .map(|c| c.whisper_model)
@@ -116,21 +118,21 @@ pub fn start(_app: &tauri::AppHandle) -> Result<()> {
         .map(|c| c.custom_dictionary)
         .unwrap_or_default();
 
+    // Clone the `AppState` handle so the worker thread can borrow the shared
+    // `Transcriber` (built lazily by either the capture pipeline or the first
+    // HTTP request) instead of loading its own.
+    let state: AppState = app.state::<AppState>().inner().clone();
+
     std::thread::Builder::new()
         .name("vibetotext-local-api".into())
         .spawn(move || {
-            // Lazily-loaded, shared across requests. The whisper context inside
-            // is itself Mutex-guarded (not reentrant), so concurrent requests
-            // serialize on inference — acceptable for this low-traffic endpoint.
-            let transcriber: std::sync::OnceLock<Arc<Transcriber>> = std::sync::OnceLock::new();
-
             tracing::info!(
                 addr = BIND_ADDR,
-                "local transcription API listening (loopback only)"
+                "local transcription API listening (loopback only, shared model)"
             );
 
             for request in server.incoming_requests() {
-                handle_request(request, &transcriber, &model_name, &custom_words, &token);
+                handle_request(request, &state, &model_name, &custom_words, &token);
             }
         })
         .context("failed to spawn local-api server thread")?;
@@ -141,7 +143,7 @@ pub fn start(_app: &tauri::AppHandle) -> Result<()> {
 /// Handle one HTTP request: route, decode, transcribe, and respond.
 fn handle_request(
     mut request: tiny_http::Request,
-    transcriber: &std::sync::OnceLock<Arc<Transcriber>>,
+    state: &AppState,
     model_name: &str,
     custom_words: &[String],
     token: &str,
@@ -180,9 +182,31 @@ fn handle_request(
         return;
     }
 
-    match transcribe_from_json(&body, transcriber, model_name, custom_words) {
+    match transcribe_from_json(&body, state, model_name, custom_words) {
         Ok(resp) => respond_json(request, 200, &resp),
-        Err(e) => respond_error(request, 400, &e.to_string()),
+        Err(TranscribeError::BadRequest(e)) => respond_error(request, 400, &e.to_string()),
+        Err(TranscribeError::ServerError(e)) => {
+            respond_error(request, 500, &format!("transcription failed: {e}"))
+        }
+    }
+}
+
+/// Errors that `transcribe_from_json` can return, mapped to HTTP status codes by
+/// [`handle_request`]. `BadRequest` → 400 (client sent something malformed),
+/// `ServerError` → 500 (model or inference failure on our side). Splitting this
+/// way keeps the HTTP layer thin and the testable core (`transcribe_from_json`)
+/// unaware of status codes.
+enum TranscribeError {
+    BadRequest(anyhow::Error),
+    ServerError(anyhow::Error),
+}
+
+impl std::fmt::Display for TranscribeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TranscribeError::BadRequest(e) => write!(f, "{e}"),
+            TranscribeError::ServerError(e) => write!(f, "{e}"),
+        }
     }
 }
 
@@ -190,21 +214,30 @@ fn handle_request(
 /// build the response. Separated from the HTTP plumbing so it is unit-testable.
 fn transcribe_from_json(
     body: &str,
-    transcriber: &std::sync::OnceLock<Arc<Transcriber>>,
+    state: &AppState,
     model_name: &str,
     custom_words: &[String],
-) -> Result<TranscribeResponse> {
-    let req: TranscribeRequest = serde_json::from_str(body).context("invalid JSON request body")?;
+) -> Result<TranscribeResponse, TranscribeError> {
+    let req: TranscribeRequest = serde_json::from_str(body).map_err(|e| {
+        TranscribeError::BadRequest(anyhow::anyhow!("invalid JSON request body: {e}"))
+    })?;
 
-    let samples = decode_f32_samples(&req.audio_b64).context("failed to decode audio_b64")?;
+    let samples = decode_f32_samples(&req.audio_b64)
+        .map_err(|e| TranscribeError::BadRequest(e.context("failed to decode audio_b64")))?;
     if samples.is_empty() {
-        anyhow::bail!("empty audio data");
+        return Err(TranscribeError::BadRequest(anyhow::anyhow!(
+            "empty audio data"
+        )));
     }
     if samples.len() > MAX_AUDIO_SAMPLES {
-        anyhow::bail!("audio exceeds the five-minute request limit");
+        return Err(TranscribeError::BadRequest(anyhow::anyhow!(
+            "audio exceeds the five-minute request limit"
+        )));
     }
     if samples.iter().any(|sample| !sample.is_finite()) {
-        anyhow::bail!("audio contains non-finite samples");
+        return Err(TranscribeError::BadRequest(anyhow::anyhow!(
+            "audio contains non-finite samples"
+        )));
     }
 
     // NOTE: whisper expects 16 kHz mono. The Python server passed sample_rate
@@ -212,41 +245,26 @@ fn transcribe_from_json(
     // so a non-16k rate is surfaced as an error rather than silently mis-decoded.
     // Resampling here is a later enhancement (parity with recorder.rs resampler).
     if req.sample_rate != 16_000 {
-        anyhow::bail!(
+        return Err(TranscribeError::BadRequest(anyhow::anyhow!(
             "unsupported sample_rate {}; only 16000 Hz mono f32 is supported",
             req.sample_rate
-        );
+        )));
     }
 
-    // Lazy, fallible one-time model resolution. `OnceLock::get_or_init` can't
-    // return a Result, so on the first request we resolve the transcriber
-    // fallibly and only cache it on success; a model-resolve/load failure
-    // surfaces as a normal error response instead of panicking the worker.
-    let t = match transcriber.get() {
-        Some(t) => t.clone(),
-        None => {
-            let t = init_transcriber(model_name)?;
-            // Race-safe: if another thread initialized concurrently, keep theirs.
-            let _ = transcriber.set(t);
-            transcriber.get().expect("transcriber set above").clone()
-        }
-    };
+    // Resolve the shared Transcriber via the AppState. The first caller (capture
+    // pipeline prewarm or a concurrent local-api request) pays the model-load
+    // cost; everyone else gets a refcount-bump clone.
+    let t: Arc<Transcriber> = state
+        .ensure_transcriber(model_name)
+        .map_err(|e| TranscribeError::ServerError(e.context("whisper model not loaded")))?;
 
     let start = std::time::Instant::now();
     let text = t
         .transcribe(&samples, custom_words)
-        .context("transcription failed")?;
+        .map_err(|e| TranscribeError::ServerError(e.context("transcription failed")))?;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     Ok(TranscribeResponse { text, duration_ms })
-}
-
-/// Resolve the model (download-on-first-run) and build a [`Transcriber`].
-fn init_transcriber(model_name: &str) -> Result<Arc<Transcriber>> {
-    let path = models::resolve_or_download(model_name)
-        .with_context(|| format!("failed to resolve whisper model '{model_name}'"))?;
-    let t = Transcriber::new(&path)?;
-    Ok(Arc::new(t))
 }
 
 /// Decode base64 of raw little-endian `f32` PCM bytes into samples.
@@ -438,33 +456,37 @@ mod tests {
 
     #[test]
     fn empty_audio_is_an_error() {
-        // Empty audio_b64 decodes to zero samples -> error (matches Python
-        // "Empty audio data"). Uses a never-initialized transcriber cell; the
-        // empty-input check fires before any model load.
-        let cell = std::sync::OnceLock::new();
+        // Empty audio_b64 decodes to zero samples -> error. The empty-input
+        // check fires before any model load, so we use a fresh AppState whose
+        // transcriber is still None.
+        let state = AppState::new().expect("app state");
         let body = json!({ "audio_b64": "", "sample_rate": 16000 }).to_string();
-        let err = transcribe_from_json(&body, &cell, "small", &[]).unwrap_err();
-        assert!(err.to_string().contains("empty audio data"));
+        let err = transcribe_from_json(&body, &state, "small", &[]).unwrap_err();
+        assert!(matches!(err, TranscribeError::BadRequest(_)));
+        let msg = format!("{err}");
+        assert!(msg.contains("empty audio data"), "got: {msg}");
     }
 
     #[test]
     fn non_16k_sample_rate_is_rejected_before_model_load() {
         // A non-16k rate must error out before any model resolution/load, so a
-        // never-initialized transcriber cell is fine here.
-        let cell = std::sync::OnceLock::new();
+        // never-initialized AppState is fine here.
+        let state = AppState::new().expect("app state");
         // One valid f32 sample so we pass the empty check and reach the rate check.
         let b64 = base64_encode(&1.0f32.to_le_bytes());
         let body = json!({ "audio_b64": b64, "sample_rate": 44100 }).to_string();
-        let err = transcribe_from_json(&body, &cell, "small", &[]).unwrap_err();
-        assert!(err.to_string().contains("unsupported sample_rate"));
+        let err = transcribe_from_json(&body, &state, "small", &[]).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("unsupported sample_rate"), "got: {msg}");
     }
 
     #[test]
     fn non_finite_samples_are_rejected_before_model_load() {
-        let cell = std::sync::OnceLock::new();
+        let state = AppState::new().expect("app state");
         let b64 = base64_encode(&f32::NAN.to_le_bytes());
         let body = json!({ "audio_b64": b64, "sample_rate": 16000 }).to_string();
-        let err = transcribe_from_json(&body, &cell, "small", &[]).unwrap_err();
-        assert!(err.to_string().contains("non-finite"));
+        let err = transcribe_from_json(&body, &state, "small", &[]).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("non-finite"), "got: {msg}");
     }
 }
