@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main PacketVoice window: core window controls plus single-instance / window-state plugin surface.",
+  "description": "Default capability for the main VibeToText window: core window controls plus single-instance / window-state plugin surface.",
   "windows": ["main"],
   "permissions": [
     "core:default",

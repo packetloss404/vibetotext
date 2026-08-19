@@ -89,8 +89,8 @@ mod tests {
 
     #[test]
     fn single_custom_word_has_no_trailing_comma() {
-        let words = vec!["PacketVoice".to_string()];
+        let words = vec!["VibeToText".to_string()];
         let prompt = build_prompt(&words);
-        assert!(prompt.contains("exactly as spelled: PacketVoice."));
+        assert!(prompt.contains("exactly as spelled: VibeToText."));
     }
 }

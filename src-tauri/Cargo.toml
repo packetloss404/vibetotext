@@ -1,20 +1,20 @@
 [package]
-name = "packetvoice"
+name = "vibetotext"
 version = "0.1.0"
-description = "PacketVoice - cross-platform push-to-talk transcription"
+description = "VibeToText - cross-platform push-to-talk transcription"
 authors = ["Ian Walmsley", "dyoburon"]
 edition = "2021"
 rust-version = "1.94"
-default-run = "packetvoice"
+default-run = "vibetotext"
 
 # The library that main.rs drives. Tauri v2 convention: app logic lives in a
 # lib crate so it can also be reused by mobile/test targets.
 [lib]
-name = "packetvoice_lib"
+name = "vibetotext_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "packetvoice"
+name = "vibetotext"
 path = "src/main.rs"
 
 [build-dependencies]

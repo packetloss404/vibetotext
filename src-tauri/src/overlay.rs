@@ -59,7 +59,7 @@ pub fn ensure(app: &tauri::AppHandle) -> tauri::Result<()> {
         // `overlay.html` is bundled alongside the main frontend (app/src/).
         WebviewUrl::App("overlay.html".into()),
     )
-    .title("PacketVoice Overlay")
+    .title("VibeToText Overlay")
     .inner_size(OVERLAY_WIDTH, OVERLAY_HEIGHT)
     .transparent(true) // see macOS note in the module docs
     .decorations(false) // borderless: no title bar / frame

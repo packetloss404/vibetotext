@@ -1,4 +1,4 @@
-# PacketVoice
+# VibeToText
 
 Voice-to-text for developers: hold a hotkey, speak, and the cleaned-up text is
 pasted at your cursor — with local Whisper transcription, AI cleanup/planning,
@@ -6,7 +6,8 @@ semantic code search, and a detailed analytics dashboard.
 
 > **Lineage:** originally created as **VibeToText** by Dylan ([dyoburon](https://github.com/dyoburon));
 > rewritten (single Tauri v2 app, Rust VADER port, native Windows/macOS builds) and continued
-> as **PacketVoice** by Ian Walmsley ([packetloss404](https://github.com/packetloss404)) since 2026.
+> by Ian Walmsley ([packetloss404](https://github.com/packetloss404)) since 2026. Briefly
+> re-released as **PacketVoice** during the Tauri migration, then reverted to **VibeToText**.
 > MIT licensed; full commit history and authorship preserved.
 
 A single cross-platform **Tauri v2** app (Rust backend + webview UI) for
@@ -78,10 +79,10 @@ CPU-only by default. GPU backends are opt-in: `cargo tauri build --features meta
 - **Models** download on first use to `~/.vibetotext/models/ggml-<model>.bin`
   (nothing is bundled); downloads are size- and checksum-verified before use.
 
-The hidden `~/.vibetotext` path is retained as a compatibility data location so
-existing PacketVoice/VibeToText history and models are not split during the rename.
+The `~/.vibetotext` data directory is kept stable across renames so existing
+history and models are not split when the product name changes.
 
-The optional `local-api` feature requires `PACKETVOICE_LOCAL_API_TOKEN` and an
+The optional `local-api` feature requires `VIBETOTEXT_LOCAL_API_TOKEN` and an
 `Authorization: Bearer <token>` header. It remains disabled in normal builds.
 
 ## Platform notes

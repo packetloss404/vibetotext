@@ -26,7 +26,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("PacketVoice")
+        .tooltip("VibeToText")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main_window(app),
             "quit" => app.exit(0),

@@ -1,4 +1,4 @@
-//! PacketVoice application library.
+//! VibeToText application library.
 //!
 //! `main.rs` is a thin shim that calls [`run`]. Keeping the app logic in a lib
 //! crate is the Tauri v2 convention and lets later phases reuse it from tests
@@ -65,19 +65,19 @@ fn init_tracing() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,packetvoice_lib=info,tao=warn,wry=warn"));
+        .unwrap_or_else(|_| EnvFilter::new("info,vibetotext_lib=info,tao=warn,wry=warn"));
 
     let mut file_guard = None;
     let file_layer = dirs::home_dir().and_then(|home| {
         let log_dir = home.join(".vibetotext").join("logs");
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
             eprintln!(
-                "PacketVoice could not create log directory {}: {e}",
+                "VibeToText could not create log directory {}: {e}",
                 log_dir.display()
             );
             return None;
         }
-        let appender = tracing_appender::rolling::daily(log_dir, "packetvoice.log");
+        let appender = tracing_appender::rolling::daily(log_dir, "vibetotext.log");
         let (writer, guard) = tracing_appender::non_blocking(appender);
         file_guard = Some(guard);
         Some(fmt::layer().with_ansi(false).with_writer(writer))
@@ -164,7 +164,7 @@ pub fn run() {
                 tracing::error!(error = %e, "failed to start local transcription API");
             }
 
-            tracing::info!("PacketVoice backend initialized");
+            tracing::info!("VibeToText backend initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -185,5 +185,5 @@ pub fn run() {
             commands::set_orb_position,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running PacketVoice application");
+        .expect("error while running VibeToText application");
 }

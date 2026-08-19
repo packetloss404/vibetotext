@@ -1,4 +1,4 @@
-# PacketVoice Release Guide
+# VibeToText Release Guide
 
 How to build, sign, and ship the Tauri app. Reflects the actual config in
 `src-tauri/` (`Cargo.toml`, `tauri.conf.json`). For the design rationale see
@@ -76,7 +76,7 @@ The localhost HTTP transcription endpoint (`local_api.rs`) is feature-gated and
 cargo tauri build --features local-api
 ```
 
-The endpoint refuses to start unless `PACKETVOICE_LOCAL_API_TOKEN` is set. Send
+The endpoint refuses to start unless `VIBETOTEXT_LOCAL_API_TOKEN` is set. Send
 that value as `Authorization: Bearer <token>` on every request. Requests are
 limited to 32 MiB and five minutes of 16 kHz mono audio.
 
@@ -93,7 +93,7 @@ targets the host OS supports. Outputs land under
 | macOS | `.app` and `.dmg` |
 | Linux | `.deb` and `.AppImage` |
 
-Product name is **PacketVoice**, identifier `com.packetvoice.app`, version from
+Product name is **VibeToText**, identifier `com.vibetotext.app`, version from
 `tauri.conf.json` (keep it in sync with `Cargo.toml`).
 
 ## 4. Code signing & notarization
@@ -117,10 +117,10 @@ Product name is **PacketVoice**, identifier `com.packetvoice.app`, version from
    `APPLE_SIGNING_IDENTITY` (+ keychain) is present.
 4. Notarize and staple:
    ```sh
-   xcrun notarytool submit PacketVoice_*.dmg \
+   xcrun notarytool submit VibeToText_*.dmg \
      --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
      --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
-   xcrun stapler staple PacketVoice_*.dmg
+   xcrun stapler staple VibeToText_*.dmg
    ```
 
 ### Windows (Authenticode)
@@ -129,7 +129,7 @@ Sign the `.msi` and NSIS `.exe` with `signtool` (Authenticode cert):
 
 ```bat
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ^
-  /f cert.pfx /p %CERT_PASSWORD% "PacketVoice_*.msi"
+  /f cert.pfx /p %CERT_PASSWORD% "VibeToText_*.msi"
 ```
 
 A code-signing cert with established reputation reduces **SmartScreen** warnings;
@@ -141,7 +141,7 @@ new certs may still warn until reputation builds.
 publish a `.sig` + public key:
 
 ```sh
-gpg --armor --detach-sign PacketVoice_*.AppImage
+gpg --armor --detach-sign VibeToText_*.AppImage
 ```
 
 ## 5. CI secrets

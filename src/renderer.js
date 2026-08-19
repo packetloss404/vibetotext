@@ -1,4 +1,4 @@
-// PacketVoice dashboard renderer (Tauri port of history-app/renderer.js).
+// VibeToText dashboard renderer (Tauri port of history-app/renderer.js).
 //
 // PHASE 1 CONTRACT: every former Node/Electron coupling point goes through the
 // global `vtt` shim from api.js (a thin wrapper over Tauri invoke/listen).
@@ -46,10 +46,10 @@ let pipelineBannerTimer = null;
 
 const PIPELINE_MESSAGES = {
   preparing_model: 'Preparing the local Whisper model… first launch may take a few minutes.',
-  ready: 'PacketVoice is ready.',
-  model_unavailable: 'The Whisper model could not be prepared. Check your network and the PacketVoice log; the next recording will retry.',
-  not_ready: 'The local Whisper model is still preparing. Try again when PacketVoice is ready.',
-  busy: 'PacketVoice is still processing the previous recording.',
+  ready: 'VibeToText is ready.',
+  model_unavailable: 'The Whisper model could not be prepared. Check your network and the VibeToText log; the next recording will retry.',
+  not_ready: 'The local Whisper model is still preparing. Try again when VibeToText is ready.',
+  busy: 'VibeToText is still processing the previous recording.',
   transcribing: 'Transcribing locally…',
   searching_context: 'Searching the configured codebase for context…',
   cleaning_up: 'Cleaning up the transcription with Gemini…',
@@ -58,8 +58,8 @@ const PIPELINE_MESSAGES = {
   saving: 'Saving transcription history…',
   pasting: 'Pasting at the cursor…',
   done: 'Transcription pasted.',
-  failed: 'Transcription failed. Check the PacketVoice log for details.',
-  permission_needed: 'PacketVoice needs an operating-system permission before hotkeys can work.',
+  failed: 'Transcription failed. Check the VibeToText log for details.',
+  permission_needed: 'VibeToText needs an operating-system permission before hotkeys can work.',
 };
 
 function showPipelineStatus(phase, mode) {

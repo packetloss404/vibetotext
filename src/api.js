@@ -1,5 +1,5 @@
 // api.js — thin shim exposing a global `vtt` object that wraps the Tauri
-// command/event surface. Phase 1 of the PacketVoice Tauri migration.
+// command/event surface. Phase 1 of the VibeToText Tauri migration.
 //
 // `withGlobalTauri` is enabled in tauri.conf.json, so the Tauri JS API is
 // available at `window.__TAURI__`:

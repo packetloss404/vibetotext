@@ -2,7 +2,7 @@
 //!
 //! This module owns the chord state machine that turns global keyboard events
 //! into [`HotkeyEvent::Start`] / [`HotkeyEvent::Stop`] for the four (well, five)
-//! PacketVoice [`Mode`]s. The actual OS event source sits behind the
+//! VibeToText [`Mode`]s. The actual OS event source sits behind the
 //! [`HotkeyBackend`] trait so we can swap the X11/macOS [`RdevBackend`] for an
 //! evdev-based `hotkey-listener` backend when we add native Wayland (plan §3/§9,
 //! risk #1).

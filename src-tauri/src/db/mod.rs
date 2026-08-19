@@ -1,4 +1,4 @@
-//! SQLite history layer for PacketVoice.
+//! SQLite history layer for VibeToText.
 //!
 //! Port of `src/vibetotext/history.py`. Owns the canonical `entries` table over
 //! `~/.vibetotext/history.db`, with a `PRAGMA user_version`-gated migration that

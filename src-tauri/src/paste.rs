@@ -160,7 +160,7 @@ fn notify_manual_paste_needed() {
     // The pipeline/event layer (Phase 4) can subscribe to this target to raise a
     // user-facing toast. Kept dependency-free so paste.rs stays self-contained.
     tracing::warn!(
-        target: "packetvoice::user_notification",
+        target: "vibetotext::user_notification",
         "transcription copied to clipboard — auto-paste failed, paste manually (Ctrl/Cmd+V)"
     );
 }

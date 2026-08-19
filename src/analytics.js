@@ -1,4 +1,4 @@
-// Analytics Charts for PacketVoice
+// Analytics Charts for VibeToText
 // Uses D3.js v7 for visualizations
 
 console.log('[Analytics] analytics.js loaded, D3 available:', typeof d3 !== 'undefined');

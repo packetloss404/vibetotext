@@ -130,7 +130,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<()> {
     let worker_app = app.clone();
     let worker_phase = Arc::clone(&phase);
     thread::Builder::new()
-        .name("packetvoice-pipeline".into())
+        .name("vibetotext-pipeline".into())
         .spawn(move || {
             let mut worker = Worker::new(worker_app, db_path, worker_phase);
             // Warm the model (download + load) BEFORE the event loop so the user's

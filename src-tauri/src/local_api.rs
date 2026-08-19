@@ -8,7 +8,7 @@
 //! ## Security
 //! The server binds to `127.0.0.1` (loopback) on a fixed port **only** — never
 //! to `0.0.0.0` — and requires a bearer token from
-//! `PACKETVOICE_LOCAL_API_TOKEN`. Do NOT change the bind address to a
+//! `VIBETOTEXT_LOCAL_API_TOKEN`. Do NOT change the bind address to a
 //! non-loopback interface.
 //!
 //! ## Protocol (mirrors `socket_server.py`)
@@ -17,7 +17,7 @@
 //!
 //! - Request:  `POST /transcribe` with body
 //!   `{"audio_b64": "<base64 little-endian f32 samples>", "sample_rate": 16000}`
-//!   and `Authorization: Bearer <PACKETVOICE_LOCAL_API_TOKEN>`.
+//!   and `Authorization: Bearer <VIBETOTEXT_LOCAL_API_TOKEN>`.
 //! - Success:  `200` `{"text": "...", "duration_ms": 450}`
 //! - Error:    non-2xx `{"error": "..."}`
 //!
@@ -89,11 +89,11 @@ struct ErrorResponse {
 /// so a future revision can pull live state (shared model, config watcher) off
 /// the [`tauri::AppHandle`] without a signature change.
 pub fn start(_app: &tauri::AppHandle) -> Result<()> {
-    let token = std::env::var("PACKETVOICE_LOCAL_API_TOKEN")
+    let token = std::env::var("VIBETOTEXT_LOCAL_API_TOKEN")
         .ok()
         .map(|token| token.trim().to_string())
         .filter(|token| !token.is_empty())
-        .context("PACKETVOICE_LOCAL_API_TOKEN must be set when the local-api feature is enabled")?;
+        .context("VIBETOTEXT_LOCAL_API_TOKEN must be set when the local-api feature is enabled")?;
     // Bind eagerly so a port conflict surfaces to the caller now, not later in
     // the worker thread where it could only be logged.
     let server = tiny_http::Server::http(BIND_ADDR)
@@ -117,7 +117,7 @@ pub fn start(_app: &tauri::AppHandle) -> Result<()> {
         .unwrap_or_default();
 
     std::thread::Builder::new()
-        .name("packetvoice-local-api".into())
+        .name("vibetotext-local-api".into())
         .spawn(move || {
             // Lazily-loaded, shared across requests. The whisper context inside
             // is itself Mutex-guarded (not reentrant), so concurrent requests

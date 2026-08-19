@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- Reverted the product rename and restored **VibeToText** as the canonical name (was briefly PacketVoice during the Tauri migration). Bundle identifier `com.vibetotext.app`, binary `vibetotext`, env var `VIBETOTEXT_LOCAL_API_TOKEN`. The `~/.vibetotext` data directory is unchanged, so existing history, models, and config carry over.
+
+## v0.1.0 — Tauri rewrite (was PacketVoice)
+
 ### Added
 - **Tauri v2 rewrite** — Single cross-platform app (Rust backend + webview UI) under `src-tauri`, replacing the previous Python and multi-platform implementations
 - **Local Whisper transcription** — `whisper-rs` bindings to whisper.cpp for on-device speech-to-text (CPU by default; optional Metal/CUDA/Vulkan GPU backends)
@@ -11,7 +16,7 @@
 - **Settings controls** — Validated microphone/model/codebase selection, write-only Gemini key management, and confirmed history clearing
 
 ### Changed
-- Completed the active product rename to PacketVoice while retaining `~/.vibetotext` as the compatibility data location
+- Renamed the product to PacketVoice (briefly) while keeping `~/.vibetotext` as the data directory for continuity
 - Upgraded cleanup and planning to the stable `gemini-3.6-flash` model and removed deprecated sampling parameters
 - Standardized timestamps as explicit UTC and calendar analytics as local-time buckets
 

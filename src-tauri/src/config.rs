@@ -246,7 +246,7 @@ impl AppConfig {
             .ok()
             .is_some_and(|dir| dotenv_lookup(&dir.join(".env")).is_some())
         {
-            return Some("PacketVoice settings");
+            return Some("VibeToText settings");
         }
         self.gemini_api_key
             .as_deref()
@@ -255,7 +255,7 @@ impl AppConfig {
             .map(|_| "legacy config")
     }
 
-    /// Store or clear the key managed by PacketVoice in its private `.env`
+    /// Store or clear the key managed by VibeToText in its private `.env`
     /// file. Existing unrelated variables and comments are preserved.
     pub fn set_managed_gemini_api_key(key: Option<&str>) -> Result<(), ConfigError> {
         let dir = Self::data_dir()?;

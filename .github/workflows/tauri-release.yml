@@ -131,7 +131,7 @@ jobs:
           # The Tauri project lives under src-tauri.
           projectPath: src-tauri
           tagName: ${{ github.ref_name }}
-          releaseName: 'PacketVoice ${{ github.ref_name }}'
+          releaseName: 'VibeToText ${{ github.ref_name }}'
           releaseBody: 'See the assets below to download and install this version.'
           releaseDraft: true
           prerelease: false
