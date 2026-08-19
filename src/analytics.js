@@ -119,6 +119,21 @@ function showTooltip(event, text) {
     .style('opacity', 1);
 }
 
+// HTML variant for tooltips whose content is built from a hardcoded allowlist
+// (e.g. the topic classifier's fixed taxonomy). The caller is responsible for
+// NOT passing user-derived strings — every interpolated value must be a known
+// string constant. User-derived text always goes through showTooltip().
+function showTooltipHtml(event, safeHtml) {
+  const tip = getTooltip();
+  const vw = window.innerWidth;
+  const flipX = event.clientX > vw - 220;
+  const left = flipX ? event.pageX - 220 : event.pageX + 10;
+  tip.html(safeHtml)
+    .style('left', left + 'px')
+    .style('top', (event.pageY - 10) + 'px')
+    .style('opacity', 1);
+}
+
 function hideTooltip() {
   getTooltip().style('opacity', 0);
 }
@@ -1884,7 +1899,10 @@ function renderTopicSpeedMood(containerId, topicSpeedMood) {
     .on('mouseover', function(event, d) {
       d3.select(this).attr('opacity', 1);
       const sentLabel = d.avgSentiment >= 0.05 ? 'positive' : d.avgSentiment <= -0.05 ? 'negative' : 'neutral';
-      showTooltip(event,
+      // d.topic comes from the hardcoded TOPIC_RULES taxonomy, d.avgWpm /
+      // d.avgSentiment / d.sessions are numbers, sentLabel is a literal —
+      // safe to pass through to tip.html() via showTooltipHtml.
+      showTooltipHtml(event,
         `<strong>${d.topic}</strong><br/>` +
         `${d.avgWpm} WPM avg<br/>` +
         `Sentiment: ${d.avgSentiment >= 0 ? '+' : ''}${d.avgSentiment.toFixed(2)} (${sentLabel})<br/>` +
