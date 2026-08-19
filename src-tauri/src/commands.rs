@@ -98,10 +98,9 @@ pub fn get_entries(
 /// Phase 0 `Db::get_statistics` aggregates over all rows, so a per-mode breakdown
 /// is a documented later refinement (the frontend currently requests "all").
 #[tauri::command]
-#[allow(unused_variables)]
 pub fn get_statistics(
     state: State<'_, AppState>,
-    mode: Option<String>,
+    _mode: Option<String>,
 ) -> Result<Statistics, String> {
     let db = open_db(&state)?;
     db.get_statistics().map_err(|e| e.to_string())

@@ -462,8 +462,7 @@ pub fn spawn(on_event: impl Fn(HotkeyEvent) + Send + 'static) -> bool {
     permission_ready
 }
 
-// `RdevBackend` must be `Send` for `spawn` to move it onto a thread.
-unsafe impl Send for RdevBackend {}
+// `RdevBackend` is `Send`+`Sync` automatically — it only contains a unit field.
 
 #[cfg(test)]
 mod tests {
