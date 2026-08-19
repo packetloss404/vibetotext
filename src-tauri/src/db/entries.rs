@@ -4,7 +4,7 @@
 //! `src/vibetotext/history.py`. `add_entry` computes `word_count`, `wpm`, and
 //! `sentiment` internally; reads return rows newest-first.
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
 use super::{DbError, Scorer};
@@ -134,15 +134,6 @@ pub(super) fn get_entries(
 }
 
 /// Total row count — small helper used by callers/tests.
-#[allow(dead_code)]
-pub(super) fn count(conn: &Connection) -> Result<i64, DbError> {
-    let c = conn
-        .query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))
-        .optional()?
-        .unwrap_or(0);
-    Ok(c)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

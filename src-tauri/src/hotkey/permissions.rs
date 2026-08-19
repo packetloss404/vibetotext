@@ -65,12 +65,6 @@ mod macos {
         static kCFBooleanTrue: CFTypeRef;
         static kCFAllocatorDefault: CFAllocatorRef;
 
-        fn CFStringCreateWithCString(
-            alloc: CFAllocatorRef,
-            c_str: *const i8,
-            encoding: u32,
-        ) -> CFStringRef;
-
         fn CFDictionaryCreate(
             allocator: CFAllocatorRef,
             keys: *const *const c_void,
@@ -95,9 +89,6 @@ mod macos {
         // The CFStringRef key used to request the system prompt.
         static kAXTrustedCheckOptionPrompt: CFStringRef;
     }
-
-    // kCFStringEncodingUTF8
-    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 
     pub fn ensure_accessibility() -> bool {
         // Fast path: already trusted, nothing to prompt.
@@ -128,13 +119,6 @@ mod macos {
             if !options.is_null() {
                 CFRelease(options);
             }
-
-            // Silence the unused-import-style warning for the helper we keep
-            // available for callers that want to build CF strings themselves.
-            let _ = (
-                CFStringCreateWithCString as usize,
-                K_CF_STRING_ENCODING_UTF8,
-            );
 
             trusted
         }

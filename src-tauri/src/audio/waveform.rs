@@ -59,8 +59,9 @@ pub fn compute_bars(samples: &[f32]) -> [f32; NUM_BARS] {
 /// Stateful analyzer reproducing the Python temporal smoothing.
 ///
 /// Holds the previous frame's bar levels and a cached FFT plan so the overlay
-/// can call [`WaveformAnalyzer::process`] once per audio callback. Reset state
-/// at the start of each recording via [`WaveformAnalyzer::reset`].
+/// can call [`WaveformAnalyzer::process`] once per audio callback. The recorder
+/// builds a fresh analyzer per recording session, so the smoothing state resets
+/// implicitly without an explicit `reset` call.
 pub struct WaveformAnalyzer {
     fft: Arc<dyn Fft<f32>>,
     prev_levels: [f32; NUM_BARS],
@@ -73,12 +74,6 @@ impl WaveformAnalyzer {
             fft: make_fft(),
             prev_levels: [0.0; NUM_BARS],
         }
-    }
-
-    /// Clear the smoothing state (call at the start of a new recording).
-    #[allow(dead_code)]
-    pub fn reset(&mut self) {
-        self.prev_levels = [0.0; NUM_BARS];
     }
 
     /// Process one audio frame, applying temporal smoothing against the

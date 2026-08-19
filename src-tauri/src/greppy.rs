@@ -430,22 +430,6 @@ mod tests {
     }
 
     #[test]
-    fn run_greppy_returns_none_when_binary_absent() {
-        // No real greppy needed: a nonexistent binary name forces the
-        // io::ErrorKind::NotFound spawn-error path, which must map to None
-        // (the graceful absent-binary path matching Python FileNotFoundError).
-        // We exercise run_greppy indirectly by confirming the spawn-error map
-        // is None for a guaranteed-absent command.
-        let result = Command::new("greppy_definitely_not_installed_xyz123")
-            .arg("search")
-            .output();
-        // Sanity: the OS reports NotFound for an absent binary.
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-
-    #[test]
     fn code_context_none_when_binary_absent() {
         // End-to-end graceful path: code_context must return None (not panic,
         // not error) when greppy cannot be spawned. run_greppy uses the literal
