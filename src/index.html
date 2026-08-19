@@ -66,27 +66,28 @@
 
     <div class="microphone-panel" id="microphone-panel" style="display: none;">
       <div class="mic-settings">
-        <h3>Audio Input Device</h3>
+        <h3 id="mic-heading">Audio Input Device</h3>
         <p class="mic-description">Select the microphone to use for voice recording.</p>
-        <select id="mic-select" class="mic-dropdown">
+        <select id="mic-select" class="mic-dropdown" aria-labelledby="mic-heading">
           <option value="">Loading devices...</option>
         </select>
-        <p class="mic-status" id="mic-status"></p>
+        <p class="mic-status" id="mic-status" aria-live="polite"></p>
       </div>
     </div>
 
     <div class="dictionary-panel" id="dictionary-panel" style="display: none;">
       <div class="dict-settings">
-        <h3>Custom Dictionary</h3>
+        <h3 id="dict-heading">Custom Dictionary</h3>
         <p class="dict-description">Add words you use frequently to improve transcription accuracy. These words will be included in the Whisper prompt.</p>
         <div class="dict-input-row">
+          <label for="dict-input" class="sr-only">Custom word or phrase</label>
           <input type="text" id="dict-input" class="dict-input" placeholder="Enter a word or phrase...">
           <button id="dict-add-btn" class="dict-add-btn">Add</button>
         </div>
-        <div class="dict-words" id="dict-words">
+        <div class="dict-words" id="dict-words" aria-labelledby="dict-heading">
           <!-- Words will be populated by JavaScript -->
         </div>
-        <p class="dict-status" id="dict-status"></p>
+        <p class="dict-status" id="dict-status" aria-live="polite"></p>
       </div>
     </div>
 
@@ -113,13 +114,13 @@
           </div>
           <button id="orb-custom-save" class="orb-custom-btn">Apply</button>
         </div>
-        <p class="settings-status" id="orb-status"></p>
+        <p class="settings-status" id="orb-status" aria-live="polite"></p>
       </div>
 
       <div class="settings-section">
-        <h3>Whisper Model</h3>
+        <h3 id="model-heading">Whisper Model</h3>
         <p class="settings-description">Larger models are more accurate but slower to load and transcribe.</p>
-        <select id="model-select" class="mic-dropdown">
+        <select id="model-select" class="mic-dropdown" aria-labelledby="model-heading">
           <option value="tiny">tiny — fastest, least accurate</option>
           <option value="base">base</option>
           <option value="small" selected>small (default)</option>
@@ -129,35 +130,37 @@
           <option value="large-v3">large-v3 — most accurate</option>
           <option value="large-v3-turbo">large-v3-turbo — faster large model</option>
         </select>
-        <p class="settings-status" id="model-status"></p>
+        <p class="settings-status" id="model-status" aria-live="polite"></p>
       </div>
 
       <div class="settings-section">
-        <h3>Codebase Context</h3>
+        <h3 id="codebase-heading">Codebase Context</h3>
         <p class="settings-description">Directory searched by Greppy and used for code-aware transcription context.</p>
         <div class="settings-input-row">
+          <label for="codebase-path" class="sr-only">Codebase path</label>
           <input type="text" id="codebase-path" class="settings-input" placeholder="D:\projects\my-project">
           <button id="codebase-save" class="orb-custom-btn">Save</button>
         </div>
-        <p class="settings-status" id="codebase-status"></p>
+        <p class="settings-status" id="codebase-status" aria-live="polite"></p>
       </div>
 
       <div class="settings-section">
-        <h3>Gemini</h3>
+        <h3 id="gemini-heading">Gemini</h3>
         <p class="settings-description">Optional API key for Cleanup and Plan modes. The key is stored in a private backend file and is never returned to this page.</p>
         <div class="settings-input-row">
+          <label for="gemini-key" class="sr-only">Gemini API key</label>
           <input type="password" id="gemini-key" class="settings-input" autocomplete="off" placeholder="Paste a Gemini API key">
           <button id="gemini-save" class="orb-custom-btn">Save</button>
           <button id="gemini-clear" class="settings-secondary-btn">Clear stored key</button>
         </div>
-        <p class="settings-status" id="gemini-status"></p>
+        <p class="settings-status" id="gemini-status" aria-live="polite"></p>
       </div>
 
       <div class="settings-section danger-section">
         <h3>History</h3>
         <p class="settings-description">Permanently delete all locally stored transcription history.</p>
         <button id="history-clear" class="settings-danger-btn">Clear transcription history</button>
-        <p class="settings-status" id="history-status"></p>
+        <p class="settings-status" id="history-status" aria-live="polite"></p>
       </div>
     </div>
 
