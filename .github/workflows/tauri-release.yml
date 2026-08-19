@@ -108,19 +108,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
           # --- macOS code signing + notarization (placeholders) ---
-          # Populate these repo secrets to enable signed/notarized .dmg builds.
-          # Until then the macOS legs produce unsigned bundles.
+          # Populate these repo secrets AND uncomment the lines below to enable
+          # signed/notarized .dmg builds. Until then the macOS legs produce
+          # unsigned bundles.
           #   APPLE_CERTIFICATE         base64 of the .p12 signing cert
           #   APPLE_CERTIFICATE_PASSWORD password for the .p12
           #   APPLE_SIGNING_IDENTITY    e.g. "Developer ID Application: Name (TEAMID)"
           #   APPLE_ID / APPLE_PASSWORD app-store-connect creds (app-specific pwd)
           #   APPLE_TEAM_ID             10-char Apple Team ID
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # NOTE: do not set these env vars with ${{ secrets.X }} when the
+          # secret is empty — tauri-action will try to import the empty cert
+          # and the codesign step will fail. Only uncomment when you actually
+          # have certs in the repo secrets.
 
           # --- Windows code signing (placeholders) ---
           # Tauri reads these from tauri.conf.json's bundle.windows.* or via the
