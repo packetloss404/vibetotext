@@ -333,15 +333,6 @@ body {
   word-break: break-word;
 }
 
-.entry-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
 .entry-stats {
   font-size: 11px;
   color: var(--text-muted);
@@ -521,29 +512,9 @@ body {
   color: var(--text-primary);
 }
 
-/* Sessions Today */
-#sessions-today {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
 /* Activity Heatmap */
 .activity-heatmap rect {
   rx: 2;
-}
-
-.chart-line {
-  fill: none;
-  stroke-width: 2;
-}
-
-.chart-area {
-  opacity: 0.3;
-}
-
-.chart-dot {
-  r: 4;
 }
 
 .axis text {
@@ -1550,24 +1521,4 @@ body {
   color: #fecaca;
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.45);
-}
-
-.restart-btn {
-  padding: 12px 24px;
-  font-size: 14px;
-  font-weight: 500;
-  background: #fbbf24;
-  border: none;
-  border-radius: 8px;
-  color: #0d0d0f;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.restart-btn:hover {
-  background: #f59e0b;
-}
-
-.restart-btn:active {
-  transform: scale(0.98);
 }
