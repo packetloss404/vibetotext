@@ -60,3 +60,6 @@ native-app/.build/
 
 # 3D model files
 *.glb
+
+# Scratch / backup directories created during work sessions
+.scratch-backup/
