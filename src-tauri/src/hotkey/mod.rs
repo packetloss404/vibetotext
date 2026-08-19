@@ -447,11 +447,16 @@ impl HotkeyBackend for RdevBackend {
 /// Wayland), preserves left/right modifier identity, drops the OS handle via
 /// `Drop` on the `keytap::Tap`. Supersedes rdev on every axis that matters for
 /// this project; see `docs/advanced-improvements-2026-08-19.md` § I.
+///
+/// The struct is defined unconditionally so the no-feature fallback impl below
+/// can name it. The real event-source wiring is gated by `keytap-backend`.
+#[allow(dead_code)] // not constructed when `keytap-backend` is disabled
 pub struct KeytapBackend {
     _private: (),
 }
 
 impl KeytapBackend {
+    #[cfg(feature = "keytap-backend")]
     pub fn new() -> Self {
         Self { _private: () }
     }
