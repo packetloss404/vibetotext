@@ -79,16 +79,30 @@ jobs:
       - name: Install Linux system dependencies (Tauri/wry)
         if: matrix.platform == 'ubuntu-latest'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libasound2-dev \
-            pkg-config \
-            cmake \
-            build-essential
+          # GitHub-hosted ubuntu runners intermittently hang on apt-get
+          # against the Ubuntu archive (TCP stalls mid-fetch). The previous
+          # build would silently sit on `apt-get install` for 30+ min
+          # before timing out. Retry on transient fetch errors and bail fast
+          # on real failures instead of waiting for the job-level 6h timeout.
+          set -e
+          for attempt in 1 2 3; do
+            if sudo -E apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+              && sudo -E apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+                libwebkit2gtk-4.1-dev \
+                libgtk-3-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev \
+                libasound2-dev \
+                pkg-config \
+                cmake \
+                build-essential; then
+              exit 0
+            fi
+            echo "::warning::apt-get attempt $attempt failed, retrying in 30s"
+            sleep 30
+          done
+          echo "::error::apt-get failed after 3 attempts"
+          exit 1
 
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
@@ -165,16 +179,30 @@ jobs:
       - name: Install Linux system dependencies (Tauri/wry)
         if: matrix.platform == 'ubuntu-latest'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libasound2-dev \
-            pkg-config \
-            cmake \
-            build-essential
+          # GitHub-hosted ubuntu runners intermittently hang on apt-get
+          # against the Ubuntu archive (TCP stalls mid-fetch). The previous
+          # build would silently sit on `apt-get install` for 30+ min
+          # before timing out. Retry on transient fetch errors and bail fast
+          # on real failures instead of waiting for the job-level 6h timeout.
+          set -e
+          for attempt in 1 2 3; do
+            if sudo -E apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+              && sudo -E apt-get install -y --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=60 \
+                libwebkit2gtk-4.1-dev \
+                libgtk-3-dev \
+                libayatana-appindicator3-dev \
+                librsvg2-dev \
+                libasound2-dev \
+                pkg-config \
+                cmake \
+                build-essential; then
+              exit 0
+            fi
+            echo "::warning::apt-get attempt $attempt failed, retrying in 30s"
+            sleep 30
+          done
+          echo "::error::apt-get failed after 3 attempts"
+          exit 1
 
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
