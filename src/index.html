@@ -35,16 +35,16 @@
       <span id="pipeline-message"></span>
     </div>
 
-    <div class="tabs" id="tabs">
-      <button class="tab active" data-mode="all">All</button>
-      <button class="tab" data-mode="transcribe">Transcribe</button>
-      <button class="tab" data-mode="greppy">Greppy</button>
-      <button class="tab" data-mode="cleanup">Cleanup</button>
-      <button class="tab" data-mode="plan">Plan</button>
-      <button class="tab" data-mode="analytics">Analytics</button>
-      <button class="tab" data-mode="microphone">Microphone</button>
-      <button class="tab" data-mode="dictionary">Dictionary</button>
-      <button class="tab" data-mode="settings">Settings</button>
+    <div class="tabs" id="tabs" role="tablist" aria-label="View mode">
+      <button class="tab active" data-mode="all" role="tab" aria-selected="true">All</button>
+      <button class="tab" data-mode="transcribe" role="tab" aria-selected="false">Transcribe</button>
+      <button class="tab" data-mode="greppy" role="tab" aria-selected="false">Greppy</button>
+      <button class="tab" data-mode="cleanup" role="tab" aria-selected="false">Cleanup</button>
+      <button class="tab" data-mode="plan" role="tab" aria-selected="false">Plan</button>
+      <button class="tab" data-mode="analytics" role="tab" aria-selected="false">Analytics</button>
+      <button class="tab" data-mode="microphone" role="tab" aria-selected="false">Microphone</button>
+      <button class="tab" data-mode="dictionary" role="tab" aria-selected="false">Dictionary</button>
+      <button class="tab" data-mode="settings" role="tab" aria-selected="false">Settings</button>
     </div>
 
     <div class="common-words" id="common-words-section">
@@ -189,9 +189,9 @@
         <div class="chart-card">
           <div class="activity-header">
             <h3>Activity</h3>
-            <div class="activity-tabs">
-              <button class="activity-tab active" data-view="hourly">Hourly</button>
-              <button class="activity-tab" data-view="yearly">Yearly</button>
+            <div class="activity-tabs" role="tablist" aria-label="Activity time range">
+              <button class="activity-tab active" data-view="hourly" role="tab" aria-selected="true">Hourly</button>
+              <button class="activity-tab" data-view="yearly" role="tab" aria-selected="false">Yearly</button>
             </div>
           </div>
           <div id="activity-heatmap"></div>
